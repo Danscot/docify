@@ -1,0 +1,43 @@
+{% extends "core/base.html" %}
+
+{% block title %}Templates — Docify{% endblock %}
+{% block breadcrumb %}<span>Templates</span>{% endblock %}
+
+{% block topbar_actions %}
+<a href="{% url 'core:template_upload' %}" class="btn-primary">+ Upload Template</a>
+{% endblock %}
+
+{% block content %}
+{% if templates %}
+<div class="grid-cards">
+  {% for t in templates %}
+  <a href="{% url 'core:template_detail' t.pk %}" class="template-card">
+    <div class="template-card-thumb">
+      {% if t.thumbnail %}
+      <img src="{{ t.thumbnail.url }}" alt="{{ t.name }}" />
+      {% else %}
+      <div class="thumb-placeholder">PDF</div>
+      {% endif %}
+      {% if t.primary_color %}
+      <div class="color-swatch" style="background:{{ t.primary_color }}"></div>
+      {% endif %}
+    </div>
+    <div class="template-card-body">
+      <div class="template-card-name">{{ t.name }}</div>
+      <div class="template-card-meta">
+        <span>{{ t.total_pages|default:"—" }} pages</span>
+        <span class="badge badge--{{ t.status }}">{{ t.get_status_display }}</span>
+      </div>
+    </div>
+  </a>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty-state-lg">
+  <div class="empty-icon">📄</div>
+  <h2>No templates yet</h2>
+  <p>Upload a PDF to extract its style and start generating documents.</p>
+  <a href="{% url 'core:template_upload' %}" class="btn-primary">Upload your first PDF</a>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,58 @@
+{% extends "core/base.html" %}
+{% block title %}Live Logs — Docify{% endblock %}
+{% block breadcrumb %}<span>Logs</span>{% endblock %}
+
+{% block topbar_actions %}
+<a href="?n={{ n }}" class="btn-secondary btn-sm">↺ Refresh</a>
+<a href="?n=500" class="btn-secondary btn-sm">Last 500</a>
+<a href="?n=50"  class="btn-secondary btn-sm">Last 50</a>
+<button class="btn-secondary btn-sm" id="auto-btn">Auto: OFF</button>
+<button class="btn-secondary btn-sm" id="clear-btn" onclick="clearLog()">Clear view</button>
+{% endblock %}
+
+{% block content %}
+<div class="log-wrap">
+  <div class="log-meta">
+    Showing last <strong>{{ lines|length }}</strong> lines &nbsp;·&nbsp;
+    <code>{{ log_path }}</code>
+    &nbsp;·&nbsp;
+    <span class="log-legend">
+      <span class="ll-debug">DEBUG</span>
+      <span class="ll-info">INFO</span>
+      <span class="ll-warn">WARNING</span>
+      <span class="ll-error">ERROR</span>
+    </span>
+  </div>
+  <pre class="log-pre" id="log-pre">{% for line in lines %}<span class="log-line {% if 'ERROR' in line %}ll-error{% elif 'WARNING' in line %}ll-warn{% elif 'INFO' in line %}ll-info{% else %}ll-debug{% endif %}">{{ line }}</span>{% endfor %}</pre>
+</div>
+
+<script>
+const pre = document.getElementById('log-pre');
+pre.scrollTop = pre.scrollHeight;
+
+let interval = null;
+const btn = document.getElementById('auto-btn');
+
+btn.addEventListener('click', () => {
+  if (interval) {
+    clearInterval(interval);
+    interval = null;
+    btn.textContent = 'Auto: OFF';
+    btn.classList.replace('btn-primary','btn-secondary');
+  } else {
+    interval = setInterval(() => location.reload(), 3000);
+    btn.textContent = 'Auto: ON (3s)';
+    btn.classList.replace('btn-secondary','btn-primary');
+  }
+});
+
+function clearLog() {
+  pre.innerHTML = '<span class="ll-info">Log view cleared (file unchanged)</span>\n';
+}
+
+// Keyboard shortcut: 'a' = toggle auto-refresh
+document.addEventListener('keydown', e => {
+  if (e.key === 'a' && !e.ctrlKey && !e.metaKey) btn.click();
+});
+</script>
+{% endblock %}

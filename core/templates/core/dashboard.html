@@ -1,0 +1,128 @@
+{% extends "core/base.html" %}
+
+{% block title %}Dashboard — Docify{% endblock %}
+
+{% block breadcrumb %}<span>Dashboard</span>{% endblock %}
+
+{% block topbar_actions %}
+<a href="{% url 'core:template_upload' %}" class="btn-primary">Upload Template</a>
+<a href="{% url 'core:document_create' %}" class="btn-secondary">Generate Doc</a>
+{% endblock %}
+
+{% block content %}
+<!-- Stats -->
+<div class="stats-grid">
+  <div class="stat-card">
+    <div class="stat-value">{{ template_count }}</div>
+    <div class="stat-label">Style Templates</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value">{{ document_count }}</div>
+    <div class="stat-label">Generated Docs</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value">{{ done_count }}</div>
+    <div class="stat-label">Ready to Download</div>
+  </div>
+</div>
+
+<!-- Pipeline explainer -->
+<div class="pipeline-card">
+  <h2 class="section-title">How it works</h2>
+  <div class="pipeline-steps">
+    <div class="pipeline-step">
+      <div class="step-num">1</div>
+      <div class="step-body">
+        <div class="step-title">Upload a PDF</div>
+        <div class="step-desc">Choose any PDF whose visual style you want to clone.</div>
+      </div>
+    </div>
+    <div class="pipeline-arrow">→</div>
+    <div class="pipeline-step">
+      <div class="step-num">2</div>
+      <div class="step-body">
+        <div class="step-title">AI Analyzes Style</div>
+        <div class="step-desc">Vision model extracts layout, colors, and typography into a reusable template.</div>
+      </div>
+    </div>
+    <div class="pipeline-arrow">→</div>
+    <div class="pipeline-step">
+      <div class="step-num">3</div>
+      <div class="step-body">
+        <div class="step-title">Paste Your Content</div>
+        <div class="step-desc">Provide your raw text. The model generates pixel-perfect HTML/CSS.</div>
+      </div>
+    </div>
+    <div class="pipeline-arrow">→</div>
+    <div class="pipeline-step">
+      <div class="step-num">4</div>
+      <div class="step-body">
+        <div class="step-title">Download PDF</div>
+        <div class="step-desc">Playwright renders the HTML to a production-ready PDF.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="two-col">
+  <!-- Recent Templates -->
+  <section>
+    <div class="section-header">
+      <h2 class="section-title">Recent Templates</h2>
+      <a href="{% url 'core:template_list' %}" class="link-subtle">View all</a>
+    </div>
+    {% if recent_templates %}
+    <div class="card-list">
+      {% for t in recent_templates %}
+      <a href="{% url 'core:template_detail' t.pk %}" class="item-card">
+        <div class="item-card-left">
+          {% if t.thumbnail %}
+          <img src="{{ t.thumbnail.url }}" alt="" class="item-thumb" />
+          {% else %}
+          <div class="item-thumb item-thumb--placeholder">PDF</div>
+          {% endif %}
+          <div>
+            <div class="item-name">{{ t.name }}</div>
+            <div class="item-meta">{{ t.total_pages|default:"?" }} pages</div>
+          </div>
+        </div>
+        <span class="badge badge--{{ t.status }}">{{ t.get_status_display }}</span>
+      </a>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state">
+      <p>No templates yet. <a href="{% url 'core:template_upload' %}">Upload your first PDF →</a></p>
+    </div>
+    {% endif %}
+  </section>
+
+  <!-- Recent Documents -->
+  <section>
+    <div class="section-header">
+      <h2 class="section-title">Recent Documents</h2>
+      <a href="{% url 'core:document_list' %}" class="link-subtle">View all</a>
+    </div>
+    {% if recent_documents %}
+    <div class="card-list">
+      {% for d in recent_documents %}
+      <a href="{% url 'core:document_detail' d.pk %}" class="item-card">
+        <div class="item-card-left">
+          <div class="item-thumb item-thumb--doc">DOC</div>
+          <div>
+            <div class="item-name">{{ d.title }}</div>
+            <div class="item-meta">{{ d.template.name }}</div>
+          </div>
+        </div>
+        <span class="badge badge--{{ d.status }}">{{ d.get_status_display }}</span>
+      </a>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state">
+      <p>No documents yet. <a href="{% url 'core:document_create' %}">Generate one →</a></p>
+    </div>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

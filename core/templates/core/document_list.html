@@ -1,0 +1,47 @@
+{% extends "core/base.html" %}
+
+{% block title %}Documents — Docify{% endblock %}
+{% block breadcrumb %}<span>Documents</span>{% endblock %}
+
+{% block topbar_actions %}
+<a href="{% url 'core:document_create' %}" class="btn-primary">+ Generate Document</a>
+{% endblock %}
+
+{% block content %}
+{% if documents %}
+<div class="table-wrap">
+  <table class="data-table">
+    <thead>
+      <tr><th>Title</th><th>Template</th><th>Status</th><th>Created</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for doc in documents %}
+      <tr>
+        <td><a href="{% url 'core:document_detail' doc.pk %}" class="link-accent">{{ doc.title }}</a></td>
+        <td class="text-muted"><a href="{% url 'core:template_detail' doc.template.pk %}" class="link-subtle">{{ doc.template.name }}</a></td>
+        <td><span class="badge badge--{{ doc.status }}">{{ doc.get_status_display }}</span></td>
+        <td class="text-muted">{{ doc.created_at|date:"M d, Y H:i" }}</td>
+        <td class="actions-cell">
+          {% if doc.pdf_file %}
+          <a href="{% url 'core:document_download_pdf' doc.pk %}" class="btn-sm btn-secondary">↓ PDF</a>
+          {% endif %}
+          <form method="post" action="{% url 'core:document_delete' doc.pk %}" class="inline-form"
+                onsubmit="return confirm('Delete this document?')">
+            {% csrf_token %}
+            <button class="btn-sm btn-danger">Delete</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="empty-state-lg">
+  <div class="empty-icon">📋</div>
+  <h2>No documents yet</h2>
+  <p>Pick a template and generate your first document.</p>
+  <a href="{% url 'core:document_create' %}" class="btn-primary">Generate a Document</a>
+</div>
+{% endif %}
+{% endblock %}

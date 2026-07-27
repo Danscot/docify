@@ -1,0 +1,114 @@
+{% extends "core/base.html" %}
+
+{% block title %}{{ doc.title }} — Docify{% endblock %}
+{% block breadcrumb %}<a href="{% url 'core:document_list' %}">Documents</a> <span>/ {{ doc.title }}</span>{% endblock %}
+
+{% block topbar_actions %}
+{% if doc.pdf_file %}
+<a href="{% url 'core:document_download_pdf' doc.pk %}" class="btn-primary">↓ Download PDF</a>
+{% endif %}
+<form method="post" action="{% url 'core:document_delete' doc.pk %}" class="inline-form"
+      onsubmit="return confirm('Delete this document?')">
+  {% csrf_token %}
+  <button type="submit" class="btn-danger">Delete</button>
+</form>
+{% endblock %}
+
+{% block content %}
+<div class="detail-layout">
+
+  <!-- Left sidebar: meta + refine -->
+  <aside class="detail-sidebar">
+    <div class="meta-list">
+      <div class="meta-row">
+        <span class="meta-key">Status</span>
+        <span class="badge badge--{{ doc.status }}" id="status-badge">{{ doc.get_status_display }}</span>
+      </div>
+      <div class="meta-row">
+        <span class="meta-key">Template</span>
+        <a href="{% url 'core:template_detail' doc.template.pk %}" class="link-subtle">{{ doc.template.name }}</a>
+      </div>
+      <div class="meta-row">
+        <span class="meta-key">Created</span>
+        <span>{{ doc.created_at|date:"M d, Y H:i" }}</span>
+      </div>
+    </div>
+
+    {% if doc.status == "generating" or doc.status == "pending" %}
+    <div class="analyzing-box" id="analyzing-box">
+      <div class="spinner"></div>
+      <span id="analyzing-msg">Generating document…</span>
+    </div>
+    {% endif %}
+
+    {% if doc.status == "failed" %}
+    <div class="error-box">
+      <strong>Generation failed:</strong><br>{{ doc.error_message }}
+    </div>
+    {% endif %}
+
+    {% if doc.status == "done" %}
+    <!-- Refine panel -->
+    <div class="refine-panel">
+      <h3 class="refine-title">Refine this document</h3>
+      <p class="refine-desc">Describe what to change. The AI will update the HTML and regenerate the PDF.</p>
+      <form method="post" action="{% url 'core:document_refine' doc.pk %}" class="form">
+        {% csrf_token %}
+        {{ refine_form.feedback }}
+        {% if refine_form.feedback.errors %}<div class="field-error">{{ refine_form.feedback.errors.0 }}</div>{% endif %}
+        <button type="submit" class="btn-secondary refine-btn">Apply Refinement</button>
+      </form>
+    </div>
+    {% endif %}
+  </aside>
+
+  <!-- Right: preview -->
+  <section class="detail-main">
+    <h2 class="section-title">{{ doc.title }}</h2>
+
+    {% if doc.html_file %}
+    <div class="preview-toolbar">
+      <span class="preview-label">HTML Preview</span>
+      {% if doc.pdf_file %}
+      <a href="{% url 'core:document_download_pdf' doc.pk %}" class="btn-sm btn-secondary">↓ PDF</a>
+      {% endif %}
+    </div>
+    <div class="preview-frame-wrap">
+      <iframe src="{{ doc.html_file.url }}" class="preview-frame" title="Document Preview"></iframe>
+    </div>
+    {% elif doc.status == "done" %}
+    <div class="empty-state"><p>Preview not available.</p></div>
+    {% elif doc.status == "pending" or doc.status == "generating" %}
+    <div class="generating-placeholder">
+      <div class="spinner spinner--lg"></div>
+      <p>Your document is being generated…</p>
+    </div>
+    {% endif %}
+
+    <!-- Raw content accordion -->
+    <details class="content-accordion">
+      <summary>View raw content</summary>
+      <pre class="content-pre">{{ doc.content }}</pre>
+    </details>
+  </section>
+
+</div>
+{% endblock %}
+
+{% block extra_js %}
+{% if doc.status == "pending" or doc.status == "generating" %}
+<script>
+(function poll() {
+  fetch("{% url 'core:document_status' doc.pk %}")
+    .then(r => r.json())
+    .then(data => {
+      if (data.status === 'done' || data.status === 'failed') {
+        location.reload();
+      } else {
+        setTimeout(poll, 3000);
+      }
+    });
+})();
+</script>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,21 @@
+# Django
+django>=4.2,<5.0
+python-dotenv
+
+# PDF pipeline — Step 1
+pdf2image          # PDF → PNG pages  (also needs: apt install poppler-utils)
+Pillow             # Image processing
+
+# PDF pipeline — Step 1 (embedded image extraction)
+pymupdf            # PyMuPDF: logo/image extraction from PDF
+
+# PDF pipeline — Steps 2+3 (AI)
+httpx              # HTTP client with proper read timeouts (used by openai)
+openai             # OpenAI-compatible client for Gemini / Gemma
+
+# PDF pipeline — Step 4
+playwright         # HTML → PDF  (also run: playwright install chromium)
+
+# Production (uncomment as needed)
+# gunicorn
+# psycopg2-binary

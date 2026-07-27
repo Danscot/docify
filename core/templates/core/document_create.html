@@ -1,0 +1,71 @@
+{% extends "core/base.html" %}
+
+{% block title %}Generate Document — Docify{% endblock %}
+{% block breadcrumb %}<a href="{% url 'core:document_list' %}">Documents</a> <span>/ New</span>{% endblock %}
+
+{% block content %}
+<div class="form-page">
+  <div class="form-card">
+    <h1 class="form-title">Generate a Document</h1>
+    <p class="form-subtitle">Choose a style template, then describe only what should change. The original document's structure, labels, and formatting are preserved exactly.</p>
+
+    <form method="post" class="form">
+      {% csrf_token %}
+
+      <div class="field">
+        <label class="field-label" for="{{ form.template.id_for_label }}">Style Template</label>
+        {{ form.template }}
+        {% if form.template.errors %}<div class="field-error">{{ form.template.errors.0 }}</div>{% endif %}
+        {% if not form.template.field.queryset.exists %}
+        <div class="field-hint">No ready templates yet. <a href="{% url 'core:template_upload' %}">Upload a PDF first →</a></div>
+        {% endif %}
+      </div>
+
+      <div class="field">
+        <label class="field-label" for="{{ form.title.id_for_label }}">Document Title</label>
+        {{ form.title }}
+        {% if form.title.errors %}<div class="field-error">{{ form.title.errors.0 }}</div>{% endif %}
+      </div>
+
+      <div class="field">
+        <label class="field-label" for="{{ form.content.id_for_label }}">Variable Content</label>
+        {{ form.content }}
+        {% if form.content.errors %}<div class="field-error">{{ form.content.errors.0 }}</div>{% endif %}
+        <div class="field-hint">
+          Provide only the values that should change from the original. The structure, labels,
+          currency, and layout come directly from your template PDF.<br><br>
+          <strong>Example for an invoice:</strong><br>
+          <code>Invoice number: INV-2024-042<br>
+Client: Société Générale Cameroun<br>
+Date: 15 janvier 2025<br>
+Item: Billet concert – Lot de 50 places<br>
+Unit price: 5 000 XAF<br>
+Quantity: 50<br>
+Total: 250 000 XAF</code>
+        </div>
+      </div>
+
+      <div class="form-actions">
+        <a href="{% url 'core:document_list' %}" class="btn-secondary">Cancel</a>
+        <button type="submit" class="btn-primary">Generate →</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="form-aside">
+    <h3 class="aside-title">How Docify preserves your template</h3>
+    <ol class="aside-steps">
+      <li>The source PDF is analyzed and its <strong>exact HTML structure</strong> is saved as a skeleton — every label, column header, and currency symbol captured literally.</li>
+      <li>Your variable content is matched to the skeleton's placeholder slots.</li>
+      <li>The skeleton is filled with your values. Structure never changes.</li>
+      <li>Playwright renders the final PDF pixel-perfectly.</li>
+    </ol>
+    <div class="aside-note">
+      <strong>What to provide:</strong> only the fields that differ from the original (amounts, client name, date, quantities). Everything else comes from the template.
+    </div>
+    <div class="aside-note" style="margin-top:10px">
+      <strong>Currency tip:</strong> always specify the currency code (XAF, EUR, USD…) in your content to avoid any ambiguity.
+    </div>
+  </div>
+</div>
+{% endblock %}
