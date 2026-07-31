@@ -44,8 +44,20 @@ class DocumentCreateForm(forms.ModelForm):
                 "class": "form-textarea",
                 "rows": 10,
                 "placeholder": "Paste your raw content here. The AI will format it to match the selected style.",
+                # Not required in HTML — browser cannot focus a hidden textarea.
+                # Required validation is done in the view instead.
+                "required": False,
             }),
         }
+
+    def __init__(self, *args, workspace=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        if workspace:
+            self.fields["template"].queryset = Template.objects.filter(
+                status="ready", workspace=workspace
+            )
+        # Make content optional at form level — view validates based on mode
+        self.fields["content"].required = False
 
 
 class DocumentRefineForm(forms.Form):

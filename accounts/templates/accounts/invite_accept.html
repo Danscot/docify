@@ -1,0 +1,14 @@
+{% extends "accounts/auth_base.html" %}
+{% block title %}Join {{ inv.workspace.name }} — Docify{% endblock %}
+{% block auth_content %}
+<h1 class="auth-title">You're invited!</h1>
+<p class="auth-sub">
+  <strong>{{ inv.invited_by.get_full_name|default:inv.invited_by.email }}</strong>
+  invited you to join <strong>{{ inv.workspace.name }}</strong> on Docify
+  as a {{ inv.get_role_display }}.
+</p>
+<div style="display:flex;gap:12px;margin-top:24px">
+  <a href="{% url 'accounts:signup' %}?next=/accounts/invite/accept/{{ inv.token }}/" class="btn-primary" style="flex:1;text-align:center;padding:10px">Create account &amp; join</a>
+  <a href="{% url 'accounts:login' %}?next=/accounts/invite/accept/{{ inv.token }}/" class="btn-secondary" style="flex:1;text-align:center;padding:10px">Sign in &amp; join</a>
+</div>
+{% endblock %}

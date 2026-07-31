@@ -1,5 +1,5 @@
 # Django
-django>=4.2,<5.0
+django>=5.2,<6.0
 python-dotenv
 
 # PDF pipeline — Step 1

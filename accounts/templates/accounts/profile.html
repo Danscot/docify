@@ -1,0 +1,120 @@
+{% extends "core/base.html" %}
+{% block title %}Profile — Docify{% endblock %}
+{% block breadcrumb %}<span>Profile</span>{% endblock %}
+
+{% block content %}
+<div class="two-col">
+
+  <!-- Profile info -->
+  <div>
+    <div class="form-card">
+      <div class="profile-hero">
+        <div class="avatar-wrap">
+          {% if profile.avatar %}
+          <img src="{{ profile.avatar.url }}" class="avatar-lg" alt="Avatar" />
+          {% else %}
+          <div class="avatar-lg avatar-initials">{{ profile.initials }}</div>
+          {% endif %}
+        </div>
+        <div>
+          <div class="profile-name">{{ profile.display_name }}</div>
+          <div class="profile-email">{{ request.user.email }}</div>
+          <div class="profile-member-since">Member since {{ request.user.date_joined|date:"M Y" }}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="form-card" style="margin-top:20px">
+      <h2 class="form-title" style="font-size:17px;margin-bottom:20px">Personal details</h2>
+      <form method="post" enctype="multipart/form-data" class="form">
+        {% csrf_token %}
+        <div class="field-row">
+          <div class="field">
+            <label class="field-label">First name</label>
+            <input type="text" name="first_name" class="form-input" value="{{ request.user.first_name }}" />
+          </div>
+          <div class="field">
+            <label class="field-label">Last name</label>
+            <input type="text" name="last_name" class="form-input" value="{{ request.user.last_name }}" />
+          </div>
+        </div>
+        <div class="field">
+          <label class="field-label">Email</label>
+          <input type="email" name="email" class="form-input" value="{{ request.user.email }}" />
+        </div>
+        <div class="field">
+          <label class="field-label">Timezone</label>
+          {{ form.timezone }}
+        </div>
+        <div class="field">
+          <label class="field-label">Avatar</label>
+          {{ form.avatar }}
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="btn-primary">Save changes</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Right column -->
+  <div>
+    <!-- Change password -->
+    <div class="form-card">
+      <h2 class="form-title" style="font-size:17px;margin-bottom:20px">Change password</h2>
+      <form method="post" action="{% url 'accounts:change_password' %}" class="form">
+        {% csrf_token %}
+        {% for field in pw_form %}
+        <div class="field">
+          <label class="field-label">{{ field.label }}</label>
+          {{ field }}
+          {% if field.errors %}<div class="field-error">{{ field.errors.0 }}</div>{% endif %}
+        </div>
+        {% endfor %}
+        <div class="form-actions">
+          <button type="submit" class="btn-secondary">Update password</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- Workspaces -->
+    <div class="form-card" style="margin-top:20px">
+      <div class="section-header">
+        <h2 class="form-title" style="font-size:17px">Workspaces</h2>
+        <a href="{% url 'accounts:workspace_create' %}" class="btn-sm btn-secondary">+ New</a>
+      </div>
+      <div class="ws-list" style="margin-top:14px">
+        {% for m in request.user.workspace_memberships.all %}
+        <div class="ws-row">
+          <div class="ws-row-left">
+            {% if m.workspace.logo %}
+            <img src="{{ m.workspace.logo.url }}" class="ws-logo" alt="" />
+            {% else %}
+            <div class="ws-logo ws-logo--placeholder">{{ m.workspace.name.0 }}</div>
+            {% endif %}
+            <div>
+              <div class="ws-name">{{ m.workspace.name }}</div>
+              <div class="ws-meta">
+                {{ m.get_role_display }} ·
+                {% if m.workspace.is_team %}Team{% else %}Personal{% endif %}
+              </div>
+            </div>
+          </div>
+          <div class="ws-row-actions">
+            {% if request.workspace and request.workspace.pk == m.workspace.pk %}
+            <span class="badge badge--ready">Active</span>
+            {% else %}
+            <a href="{% url 'accounts:workspace_switch' m.workspace.pk %}" class="btn-sm btn-secondary">Switch</a>
+            {% endif %}
+            {% if m.can_manage %}
+            <a href="{% url 'accounts:workspace_settings' m.workspace.pk %}" class="btn-sm btn-secondary">Settings</a>
+            {% endif %}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}

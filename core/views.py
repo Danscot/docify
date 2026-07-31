@@ -1,3 +1,4 @@
+import json
 import os
 from pathlib import Path
 from django.shortcuts import render, get_object_or_404, redirect
@@ -5,6 +6,7 @@ from django.http import JsonResponse, FileResponse, Http404
 from django.contrib import messages
 from django.conf import settings
 from django.views.decorators.http import require_POST
+from django.contrib.auth.decorators import login_required
 
 from .models import Template, GeneratedDocument
 from .forms import TemplateUploadForm, DocumentCreateForm, DocumentRefineForm
@@ -13,29 +15,39 @@ from . import pipeline
 
 # ── Dashboard ──────────────────────────────────────────────────────────────────
 
+@login_required
 def dashboard(request):
+    ws = request.workspace
+    qs_t = Template.objects.filter(workspace=ws) if ws else Template.objects.none()
+    qs_d = GeneratedDocument.objects.filter(workspace=ws) if ws else GeneratedDocument.objects.none()
     ctx = {
-        "template_count":  Template.objects.count(),
-        "document_count":  GeneratedDocument.objects.count(),
-        "done_count":      GeneratedDocument.objects.filter(status="done").count(),
-        "recent_templates": Template.objects.order_by("-created_at")[:4],
-        "recent_documents": GeneratedDocument.objects.order_by("-created_at")[:4],
+        "template_count":   qs_t.count(),
+        "document_count":   qs_d.count(),
+        "done_count":       qs_d.filter(status="done").count(),
+        "recent_templates": qs_t.order_by("-created_at")[:4],
+        "recent_documents": qs_d.order_by("-created_at")[:4],
     }
     return render(request, "core/dashboard.html", ctx)
 
 
 # ── Templates ──────────────────────────────────────────────────────────────────
 
+@login_required
 def template_list(request):
-    templates = Template.objects.all()
+    ws = request.workspace
+    templates = Template.objects.filter(workspace=ws) if ws else Template.objects.none()
     return render(request, "core/template_list.html", {"templates": templates})
 
 
+@login_required
 def template_upload(request):
     if request.method == "POST":
         form = TemplateUploadForm(request.POST, request.FILES)
         if form.is_valid():
-            tmpl = form.save()
+            tmpl = form.save(commit=False)
+            tmpl.workspace  = request.workspace
+            tmpl.created_by = request.user
+            tmpl.save()
             pipeline.async_analyze(str(tmpl.pk))
             messages.success(request, f"'{tmpl.name}' is being analyzed — this may take a minute.")
             return redirect("core:template_detail", pk=tmpl.pk)
@@ -44,6 +56,7 @@ def template_upload(request):
     return render(request, "core/template_upload.html", {"form": form})
 
 
+@login_required
 def template_detail(request, pk):
     tmpl = get_object_or_404(Template, pk=pk)
     documents = tmpl.documents.order_by("-created_at")
@@ -51,6 +64,7 @@ def template_detail(request, pk):
 
 
 @require_POST
+@login_required
 def template_delete(request, pk):
     tmpl = get_object_or_404(Template, pk=pk)
     name = tmpl.name
@@ -59,6 +73,7 @@ def template_delete(request, pk):
     return redirect("core:template_list")
 
 
+@login_required
 def template_status(request, pk):
     """Polling endpoint — returns JSON with current status."""
     tmpl = get_object_or_404(Template, pk=pk)
@@ -73,34 +88,114 @@ def template_status(request, pk):
 
 # ── Documents ──────────────────────────────────────────────────────────────────
 
+@login_required
 def document_list(request):
-    documents = GeneratedDocument.objects.select_related("template").all()
+    ws = request.workspace
+    documents = (GeneratedDocument.objects
+                 .filter(workspace=ws)
+                 .select_related("template") if ws else GeneratedDocument.objects.none())
     return render(request, "core/document_list.html", {"documents": documents})
 
 
+@login_required
 def document_create(request):
+    import re
+
     # Pre-select template if given via query string
-    initial = {}
-    tmpl_id = request.GET.get("template")
+    initial   = {}
+    tmpl_id   = request.GET.get("template")
+    preselect = None
+
     if tmpl_id:
         try:
-            initial["template"] = Template.objects.get(pk=tmpl_id, status="ready")
+            preselect = Template.objects.get(pk=tmpl_id, status="ready")
+            initial["template"] = preselect
         except Template.DoesNotExist:
             pass
 
     if request.method == "POST":
-        form = DocumentCreateForm(request.POST)
+        form = DocumentCreateForm(request.POST, workspace=request.workspace)
         if form.is_valid():
-            doc = form.save()
+            tmpl = form.cleaned_data["template"]
+
+            skeleton_path = Path(tmpl.template_dir) / "skeleton.html" if tmpl.template_dir else None
+            placeholders  = []
+            if skeleton_path and skeleton_path.exists():
+                html         = skeleton_path.read_text(encoding="utf-8")
+                placeholders = sorted(set(re.findall(r'\{\{([A-Z0-9_]+)\}\}', html)))
+
+            if placeholders:
+                # ── Template Fill mode ──────────────────────────────────────
+                lines = []
+                for ph in placeholders:
+                    val = request.POST.get(f"field_{ph}", "").strip()
+                    if val:
+                        lines.append(f"{ph}: {val}")
+                extra = request.POST.get("extra_instructions", "").strip()
+                if extra:
+                    lines.append(f"\n[EXTRA INSTRUCTIONS]\n{extra}")
+                content = "\n".join(lines)
+            else:
+                # ── Style Clone mode — read assembled hidden field ──────────
+                content = request.POST.get("content", "").strip()
+
+            if not content:
+                messages.error(request, "Please provide content for the document.")
+                return render(request, "core/document_create.html", {
+                    "form":          form,
+                    "placeholders":  placeholders,
+                    "defaults":      {},
+                    "defaults_json": "{}",
+                    "preselect":     tmpl,
+                })
+
+            doc = form.save(commit=False)
+            doc.content     = content
+            doc.workspace   = request.workspace
+            doc.created_by  = request.user
+            doc.save()
             pipeline.async_generate(str(doc.pk))
             messages.success(request, f"Generating '{doc.title}'…")
             return redirect("core:document_detail", pk=doc.pk)
     else:
-        form = DocumentCreateForm(initial=initial)
+        form = DocumentCreateForm(initial=initial, workspace=request.workspace)
 
-    return render(request, "core/document_create.html", {"form": form})
+    # Load placeholders + defaults for the pre-selected template (if any)
+    placeholders = []
+    defaults     = {}
+    if preselect and preselect.template_dir:
+        skeleton_path = Path(preselect.template_dir) / "skeleton.html"
+        if skeleton_path.exists():
+            html         = skeleton_path.read_text(encoding="utf-8")
+            placeholders = sorted(set(re.findall(r'\{\{([A-Z0-9_]+)\}\}', html)))
+
+            # Pull defaults from last successful document for this template
+            last_doc = (
+                preselect.documents
+                .filter(status="done")
+                .order_by("-created_at")
+                .first()
+            )
+            if last_doc and last_doc.content:
+                ph_set = set(placeholders)
+                for line in last_doc.content.splitlines():
+                    line = line.strip()
+                    if line.startswith("[EXTRA"):
+                        break
+                    m = re.match(r'([A-Z][A-Z0-9_]*)\s*:\s*(.*)', line)
+                    if m and m.group(1) in ph_set:
+                        defaults[m.group(1)] = m.group(2).strip()
+
+    return render(request, "core/document_create.html", {
+        "form":          form,
+        "placeholders":  placeholders,
+        "defaults":      defaults,
+        "defaults_json": json.dumps(defaults, ensure_ascii=False),
+        "preselect":     preselect,
+    })
 
 
+@login_required
 def document_detail(request, pk):
     doc = get_object_or_404(GeneratedDocument, pk=pk)
     refine_form = DocumentRefineForm()
@@ -108,6 +203,7 @@ def document_detail(request, pk):
 
 
 @require_POST
+@login_required
 def document_delete(request, pk):
     doc = get_object_or_404(GeneratedDocument, pk=pk)
     title = doc.title
@@ -116,6 +212,7 @@ def document_delete(request, pk):
     return redirect("core:document_list")
 
 
+@login_required
 def document_status(request, pk):
     doc = get_object_or_404(GeneratedDocument, pk=pk)
     return JsonResponse({
@@ -127,6 +224,7 @@ def document_status(request, pk):
 
 
 @require_POST
+@login_required
 def document_refine(request, pk):
     doc  = get_object_or_404(GeneratedDocument, pk=pk)
     form = DocumentRefineForm(request.POST)
@@ -139,6 +237,7 @@ def document_refine(request, pk):
     return redirect("core:document_detail", pk=pk)
 
 
+@login_required
 def document_download_pdf(request, pk):
     doc = get_object_or_404(GeneratedDocument, pk=pk)
     if not doc.pdf_file:
@@ -153,8 +252,13 @@ def document_download_pdf(request, pk):
 
 # ── Live log viewer ────────────────────────────────────────────────────────────
 
+@login_required
+@login_required
 def log_viewer(request):
-    """Tail the last N lines of docify.log for live debugging."""
+    """Tail the last N lines of docify.log — staff/superuser only."""
+    if not request.user.is_staff:
+        messages.error(request, "Access denied — admin only.")
+        return redirect("core:dashboard")
     from django.conf import settings as s
     log_path = s.BASE_DIR / "docify.log"
     lines = []
@@ -164,43 +268,67 @@ def log_viewer(request):
             all_lines = f.readlines()
             lines = all_lines[-n:]
     return render(request, "core/log_viewer.html", {
-        "lines": lines,
+        "lines":    lines,
         "log_path": log_path,
-        "n": n,
+        "n":        n,
     })
 
 
 # ── Template placeholder preview ───────────────────────────────────────────────
 
+@login_required
 def template_placeholders(request, pk):
-    """Return the placeholders detected in this template's skeleton as JSON."""
+    """
+    Return the placeholders detected in this template's skeleton as JSON,
+    plus default values extracted from the most recently generated document
+    for this template (so repeat invoices pre-fill with the last-used values).
+    """
     import re
     tmpl = get_object_or_404(Template, pk=pk)
-    placeholders = []
+    placeholders    = []
     skeleton_exists = False
-    warning = None
+    warning         = None
+    defaults        = {}
 
     if tmpl.template_dir:
         skeleton = Path(tmpl.template_dir) / "skeleton.html"
         if skeleton.exists():
             skeleton_exists = True
-            html = skeleton.read_text(encoding="utf-8")
+            html      = skeleton.read_text(encoding="utf-8")
             all_found = sorted(set(re.findall(r'\{\{([A-Z0-9_]+)\}\}', html)))
 
-            # Filter out the generic example token the model sometimes copies verbatim
             GENERIC_TOKENS = {"PLACEHOLDER", "FIELD_NAME", "VALUE", "TEXT", "CONTENT",
                                "VARIABLE", "DATA", "INPUT", "EXAMPLE"}
             placeholders = [p for p in all_found if p not in GENERIC_TOKENS]
 
             if not placeholders and all_found:
-                # All tokens were generic — skeleton is low quality
-                warning = "The skeleton only contains generic placeholder names. Re-analyze this template for better results."
-                placeholders = all_found  # show them anyway so user sees the issue
+                warning      = "The skeleton only contains generic placeholder names. Re-analyze this template for better results."
+                placeholders = all_found
             elif not all_found:
                 warning = "No placeholders found in skeleton. Re-analyze this template."
 
+    # Pull default values from the last successfully generated document
+    if placeholders:
+        last_doc = (
+            tmpl.documents
+            .filter(status="done")
+            .order_by("-created_at")
+            .first()
+        )
+        if last_doc and last_doc.content:
+            ph_set = set(placeholders)
+            for line in last_doc.content.splitlines():
+                line = line.strip()
+                if line.startswith("[EXTRA"):
+                    break
+                m = re.match(r'([A-Z][A-Z0-9_]*)\s*:\s*(.*)', line)
+                if m and m.group(1) in ph_set:
+                    defaults[m.group(1)] = m.group(2).strip()
+
     return JsonResponse({
-        "placeholders": placeholders,
+        "placeholders":    placeholders,
         "skeleton_exists": skeleton_exists,
-        "warning": warning,
+        "warning":         warning,
+        "defaults":        defaults,
+        "has_defaults":    bool(defaults),
     })

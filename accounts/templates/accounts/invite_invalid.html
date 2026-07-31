@@ -1,0 +1,10 @@
+{% extends "accounts/auth_base.html" %}
+{% block title %}Invalid invitation — Docify{% endblock %}
+{% block auth_content %}
+<h1 class="auth-title">Invitation unavailable</h1>
+<p class="auth-sub">
+  This invitation link has {% if inv.status == 'accepted' %}already been accepted{% else %}expired or been cancelled{% endif %}.
+  Ask the workspace owner to send a new one.
+</p>
+<a href="{% url 'accounts:login' %}" class="btn-primary" style="display:block;text-align:center;margin-top:24px">Go to Docify</a>
+{% endblock %}

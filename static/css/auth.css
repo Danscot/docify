@@ -1,0 +1,337 @@
+/* ── Auth layout ─────────────────────────────────────────────────────────────── */
+.auth-body { background: var(--surface-2); min-height: 100vh; display: flex; }
+
+.auth-shell {
+  display: flex;
+  min-height: 100vh;
+  width: 100%;
+}
+
+.auth-brand {
+  width: 380px;
+  flex-shrink: 0;
+  background: var(--ink);
+  color: #e5e7eb;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 48px 48px;
+}
+
+.auth-brand-logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 48px;
+}
+
+.auth-brand-quote {
+  font-family: 'Syne', 'Inter', sans-serif;
+  font-size: 26px;
+  font-weight: 800;
+  line-height: 1.2;
+  color: #fff;
+  border: none;
+  padding: 0;
+  margin: 0 0 40px;
+  font-style: normal;
+}
+
+.auth-brand-features {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.auth-brand-features li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  color: #9ca3af;
+}
+
+.auth-brand-features li::before {
+  content: "✓";
+  color: #818cf8;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.auth-main {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 24px;
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 440px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 36px;
+  box-shadow: 0 4px 24px rgba(0,0,0,.07);
+}
+
+.auth-title {
+  font-family: 'Syne', 'Inter', sans-serif;
+  font-size: 24px;
+  font-weight: 800;
+  margin-bottom: 6px;
+  color: var(--ink);
+}
+
+.auth-sub {
+  font-size: 14px;
+  color: var(--ink-muted);
+  margin-bottom: 28px;
+  line-height: 1.5;
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.auth-submit {
+  width: 100%;
+  justify-content: center;
+  padding: 11px;
+  font-size: 14px;
+  margin-top: 4px;
+}
+
+.auth-link {
+  text-align: center;
+  font-size: 13px;
+  color: var(--ink-muted);
+  margin-top: 20px;
+}
+.auth-link a { color: var(--accent); font-weight: 500; }
+
+.auth-messages { margin-bottom: 20px; }
+
+/* ── Account type cards ──────────────────────────────────────────────────────── */
+.type-cards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.type-card {
+  border: 2px solid var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: border-color var(--transition), background var(--transition);
+  display: block;
+}
+.type-card input[type="radio"] { display: none; }
+.type-card-inner { padding: 16px; }
+.type-icon { font-size: 22px; margin-bottom: 6px; }
+.type-name { font-weight: 700; font-size: 14px; margin-bottom: 3px; }
+.type-desc { font-size: 12px; color: var(--ink-muted); line-height: 1.4; }
+
+.type-card:hover         { border-color: #a5b4fc; background: var(--accent-dim); }
+.type-card--active       { border-color: var(--accent-2) !important; background: var(--accent-dim) !important; }
+.type-card--active .type-name { color: var(--accent); }
+
+/* ── Field row ──────────────────────────────────────────────────────────────── */
+.field-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+/* ── Profile page ────────────────────────────────────────────────────────────── */
+.profile-hero {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 8px 0;
+}
+.avatar-lg {
+  width: 64px; height: 64px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+.avatar-sm {
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+.avatar-initials {
+  display: flex; align-items: center; justify-content: center;
+  background: var(--accent-dim);
+  color: var(--accent);
+  font-weight: 700;
+}
+.profile-name { font-weight: 700; font-size: 16px; }
+.profile-email { font-size: 13px; color: var(--ink-muted); margin-top: 2px; }
+.profile-member-since { font-size: 12px; color: var(--ink-faint); margin-top: 2px; }
+
+/* ── Workspace list on profile ───────────────────────────────────────────────── */
+.ws-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.ws-row:last-child { border-bottom: none; }
+.ws-row-left  { display: flex; align-items: center; gap: 12px; }
+.ws-row-actions { display: flex; align-items: center; gap: 8px; }
+.ws-logo { width: 32px; height: 32px; border-radius: 6px; object-fit: cover; }
+.ws-logo--placeholder {
+  background: var(--accent-dim); color: var(--accent);
+  font-weight: 700; font-size: 13px;
+  display: flex; align-items: center; justify-content: center;
+}
+.ws-name { font-weight: 600; font-size: 13px; }
+.ws-meta { font-size: 11px; color: var(--ink-muted); margin-top: 1px; }
+
+/* ── Member list ─────────────────────────────────────────────────────────────── */
+.member-list { display: flex; flex-direction: column; gap: 2px; }
+.member-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 0; border-bottom: 1px solid var(--border);
+}
+.member-row:last-child { border-bottom: none; }
+.member-left  { display: flex; align-items: center; gap: 12px; }
+.member-right { display: flex; align-items: center; gap: 8px; }
+.member-name  { font-weight: 600; font-size: 13px; }
+.member-email { font-size: 11px; color: var(--ink-muted); margin-top: 1px; }
+.badge-you {
+  display: inline-block; font-size: 9px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .5px;
+  background: var(--accent-dim); color: var(--accent);
+  padding: 1px 6px; border-radius: 20px; margin-left: 6px;
+}
+.role-select { padding: 4px 8px; font-size: 12px; }
+
+/* ── Role options in invite form ─────────────────────────────────────────────── */
+.role-options { display: flex; flex-direction: column; gap: 8px; }
+.role-option {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: border-color var(--transition), background var(--transition);
+}
+.role-option:hover { border-color: #a5b4fc; background: var(--accent-dim); }
+.role-option input { margin-top: 2px; flex-shrink: 0; }
+.role-option-name { font-weight: 700; font-size: 13px; display: block; }
+.role-option-desc { font-size: 12px; color: var(--ink-muted); line-height: 1.4; }
+
+@media (max-width: 768px) {
+  .auth-brand { display: none; }
+  .auth-card  { max-width: 100%; border: none; box-shadow: none; padding: 24px 16px; }
+  .field-row  { grid-template-columns: 1fr; }
+  .type-cards { grid-template-columns: 1fr; }
+}
+
+/* ── My Invitations page ─────────────────────────────────────────────────────── */
+.inv-list { display: flex; flex-direction: column; gap: 14px; }
+
+.inv-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+
+.inv-card-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px;
+}
+
+.inv-ws-logo {
+  width: 40px; height: 40px;
+  border-radius: 8px;
+  background: var(--accent-dim);
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 16px;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+.inv-ws-logo img { width: 100%; height: 100%; object-fit: cover; }
+
+.inv-info { flex: 1; }
+.inv-ws-name { font-weight: 700; font-size: 14px; margin-bottom: 3px; }
+.inv-meta    { font-size: 12px; color: var(--ink-muted); line-height: 1.5; }
+.inv-expired { font-size: 12px; color: var(--red); margin-top: 3px; }
+
+.inv-card-actions {
+  display: flex;
+  gap: 10px;
+  padding: 12px 18px;
+  background: var(--surface-2);
+  border-top: 1px solid var(--border);
+}
+
+/* ── Invitation badge in user dropdown ───────────────────────────────────────── */
+.inv-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  background: #dc2626;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 20px;
+  margin-left: auto;
+  line-height: 1;
+}
+
+/* ── User lookup dropdown ────────────────────────────────────────────────────── */
+.user-lookup {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0; right: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+  z-index: 50;
+  overflow: hidden;
+}
+
+.user-lookup-result {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  font-size: 13px;
+}
+
+.user-lookup-result--new {
+  color: var(--ink-muted);
+}
+
+.user-lookup-avatar {
+  width: 30px; height: 30px;
+  border-radius: 50%;
+  background: var(--green-lt);
+  color: var(--green);
+  font-weight: 700;
+  font-size: 12px;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+
+.user-lookup-name { font-weight: 600; font-size: 13px; margin-bottom: 1px; }
+.user-lookup-hint { font-size: 11.5px; color: var(--ink-muted); }

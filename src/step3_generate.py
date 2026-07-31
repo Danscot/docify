@@ -206,6 +206,42 @@ def _map_content_to_placeholders(client, skeleton_html: str, placeholders: list,
     return mapping
 
 
+# ── Direct content parser ─────────────────────────────────────────────────────
+
+def _parse_direct_content(content: str, placeholders: list) -> tuple[dict, bool]:
+    """
+    Check if content is pre-structured as "KEY: value" lines (sent by the
+    dynamic form). If so, build the mapping directly without an AI call.
+    Returns (mapping, is_direct).
+    """
+    import re as _re
+    ph_set   = set(placeholders)
+    lines    = [l.strip() for l in content.strip().splitlines() if l.strip()]
+    mapping  = {}
+    matched  = 0
+
+    for line in lines:
+        if line.startswith("[EXTRA"):   # stop at extra instructions block
+            break
+        m = _re.match(r'([A-Z][A-Z0-9_]*)\s*:\s*(.*)', line)
+        if m and m.group(1) in ph_set:
+            mapping[m.group(1)] = m.group(2).strip()
+            matched += 1
+
+    # Consider it "direct" if at least half the placeholders matched
+    is_direct = matched >= max(1, len(placeholders) // 2)
+    return mapping, is_direct
+
+
+def _extract_extra_instructions(content: str) -> str:
+    """Pull out the [EXTRA INSTRUCTIONS] block if present."""
+    marker = "[EXTRA INSTRUCTIONS]"
+    idx = content.find(marker)
+    if idx == -1:
+        return ""
+    return content[idx + len(marker):].strip()
+
+
 # ── Skeleton fill ──────────────────────────────────────────────────────────────
 
 def _fill_skeleton(skeleton_html: str, mapping: dict) -> str:
@@ -242,9 +278,44 @@ def generate_html(template: dict, content: str, output_dir: str, model_name: str
         log.info("[Step 3] Placeholders: %s", placeholders)
 
         if placeholders:
-            mapping = _map_content_to_placeholders(
-                client, skeleton_html, placeholders, content, model_name
-            )
+            # Fast path: content arrived as structured KEY: value lines from the
+            # dynamic form — no AI call needed, build mapping directly
+            direct_mapping, is_direct = _parse_direct_content(content, placeholders)
+
+            if is_direct:
+                log.info("[Step 3] Direct field mapping — skipping AI (%d/%d fields matched)",
+                         len(direct_mapping), len(placeholders))
+                # Fill any gaps with empty string
+                for p in placeholders:
+                    if p not in direct_mapping:
+                        direct_mapping[p] = ""
+                        log.warning("[Step 3] Field not provided: %s → ''", p)
+
+                # Extra instructions → pass to AI for a light refinement pass only if present
+                extra = _extract_extra_instructions(content)
+                if extra:
+                    log.info("[Step 3] Extra instructions detected — applying via AI: %s", extra[:100])
+                    # Fill skeleton first, then ask AI to apply only the extra instructions
+                    pre_filled = _fill_skeleton(skeleton_html, direct_mapping)
+                    mapping_extra = _map_content_to_placeholders(
+                        client,
+                        pre_filled,
+                        [p for p in placeholders if not direct_mapping.get(p)],
+                        extra,
+                        model_name,
+                    )
+                    # Merge: direct values take priority, extra fills only blank slots
+                    for k, v in mapping_extra.items():
+                        if not direct_mapping.get(k):
+                            direct_mapping[k] = v
+
+                mapping = direct_mapping
+            else:
+                log.info("[Step 3] Free-text content — using AI mapping")
+                mapping = _map_content_to_placeholders(
+                    client, skeleton_html, placeholders, content, model_name
+                )
+
             html = _fill_skeleton(skeleton_html, mapping)
         else:
             log.warning("[Step 3] Skeleton has no placeholders — using as-is")

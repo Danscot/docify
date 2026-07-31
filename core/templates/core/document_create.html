@@ -4,14 +4,32 @@
 {% block breadcrumb %}<a href="{% url 'core:document_list' %}">Documents</a> <span>/ New</span>{% endblock %}
 
 {% block content %}
+
+<!-- Mode explanation banner -->
+<div class="mode-banner">
+  <div class="mode-banner-item" id="banner-fill">
+    <div class="mode-banner-icon">📋</div>
+    <div>
+      <div class="mode-banner-title">Template Fill</div>
+      <div class="mode-banner-desc">For structured documents like invoices — just change the variable fields</div>
+    </div>
+  </div>
+  <div class="mode-banner-sep">or</div>
+  <div class="mode-banner-item" id="banner-style">
+    <div class="mode-banner-icon">🎨</div>
+    <div>
+      <div class="mode-banner-title">Style Clone</div>
+      <div class="mode-banner-desc">For reports and documents — paste your content, get it formatted in the company style</div>
+    </div>
+  </div>
+</div>
+
 <div class="form-page">
   <div class="form-card">
-    <h1 class="form-title">Generate a Document</h1>
-    <p class="form-subtitle">Choose a style template, then describe only what should change. The original document's structure, labels, and formatting are preserved exactly.</p>
-
-    <form method="post" class="form">
+    <form method="post" class="form" id="gen-form" novalidate>
       {% csrf_token %}
 
+      <!-- Template selector -->
       <div class="field">
         <label class="field-label" for="{{ form.template.id_for_label }}">Style Template</label>
         {{ form.template }}
@@ -21,51 +39,327 @@
         {% endif %}
       </div>
 
+      <!-- Document title -->
       <div class="field">
         <label class="field-label" for="{{ form.title.id_for_label }}">Document Title</label>
         {{ form.title }}
         {% if form.title.errors %}<div class="field-error">{{ form.title.errors.0 }}</div>{% endif %}
+        <div class="field-hint">Reference name — does not appear in the PDF.</div>
       </div>
 
-      <div class="field">
-        <label class="field-label" for="{{ form.content.id_for_label }}">Variable Content</label>
-        {{ form.content }}
-        {% if form.content.errors %}<div class="field-error">{{ form.content.errors.0 }}</div>{% endif %}
-        <div class="field-hint">
-          Provide only the values that should change from the original. The structure, labels,
-          currency, and layout come directly from your template PDF.<br><br>
-          <strong>Example for an invoice:</strong><br>
-          <code>Invoice number: INV-2024-042<br>
-Client: Société Générale Cameroun<br>
-Date: 15 janvier 2025<br>
-Item: Billet concert – Lot de 50 places<br>
-Unit price: 5 000 XAF<br>
-Quantity: 50<br>
-Total: 250 000 XAF</code>
+      <!-- ── MODE A: Template Fill (skeleton has placeholders) ── -->
+      <div id="fields-section" style="display:{% if placeholders %}block{% else %}none{% endif %}">
+        <div class="mode-indicator mode-indicator--fill" id="mode-indicator-fill">
+          <span class="mode-indicator-icon">📋</span>
+          <div>
+            <div class="mode-indicator-title">Template Fill mode</div>
+            <div class="mode-indicator-desc">This template has known variable fields — just fill them in below.</div>
+          </div>
+        </div>
+
+        <div class="fields-header">
+          <span class="fields-title">Variable Fields</span>
+          <span class="fields-badge" id="fields-badge">
+            {% if placeholders %}{{ placeholders|length }} field{{ placeholders|length|pluralize }}{% endif %}
+          </span>
+        </div>
+
+        <div class="fields-grid" id="fields-grid">
+          {% if placeholders %}
+          <div class="defaults-notice" id="defaults-notice" {% if not defaults %}style="display:none"{% endif %}>
+            <span class="defaults-icon">↩</span>
+            Pre-filled from your last document — edit any field to change it.
+            <button type="button" class="defaults-clear" onclick="clearAllFields()">Clear all</button>
+          </div>
+          {% endif %}
+          {% for ph in placeholders %}
+          <div class="ph-field">
+            <label class="ph-label" for="field_{{ ph }}">{{ ph|lower|cut:'_'|capfirst }}
+              <span class="ph-token">&#123;&#123;{{ ph }}&#125;&#125;</span>
+            </label>
+            <input type="text" name="field_{{ ph }}" id="field_{{ ph }}"
+                   class="form-input ph-input"
+                   autocomplete="off"
+                   placeholder="{{ ph|lower|cut:'_' }}"
+                   oninput="this.classList.remove('has-default')" />
+          </div>
+          {% endfor %}
+        </div>
+
+        <!-- Extra instructions always available in Fill mode -->
+        <div class="field extra-instructions-field" style="margin-top:16px">
+          <label class="field-label" for="extra_fill">
+            Extra instructions
+            <span class="optional-badge">optional</span>
+          </label>
+          <textarea name="extra_instructions" id="extra_fill"
+                    class="form-textarea" rows="2"
+                    placeholder="e.g. Calculate total as 500 × 1 500 FCFA. Write amount in words in French."></textarea>
+          <div class="field-hint">Calculations, formatting rules, or anything that can't go in a simple field.</div>
         </div>
       </div>
 
+      <!-- ── MODE B: Style Clone (no skeleton / free text) ── -->
+      <div id="freetext-section" style="display:{% if placeholders %}none{% else %}block{% endif %}">
+        <div class="mode-indicator mode-indicator--style" id="mode-indicator-style">
+          <span class="mode-indicator-icon">🎨</span>
+          <div>
+            <div class="mode-indicator-title">Style Clone mode</div>
+            <div class="mode-indicator-desc">Paste your raw content — Docify will format it using the template's style.</div>
+          </div>
+        </div>
+
+        <div class="field">
+          <label class="field-label" for="id_content">Your Content</label>
+          <textarea name="content" id="id_content"
+                    class="form-textarea" rows="12"
+                    placeholder="Paste your raw report, notes, or structured text here.
+
+Example:
+# Q3 Sales Report — Allianz Cameroun
+
+## Executive Summary
+Revenue grew 12% compared to Q2...
+
+## Key Metrics
+- Total revenue: 45 000 000 FCFA
+- New clients: 23
+...
+
+The AI will reformat this using the template's exact fonts, colors, and layout."></textarea>
+        </div>
+      </div>
+
+      <!-- Hidden content field for form submission (filled by JS) -->
+      <input type="hidden" name="content" id="content-hidden" value="" />
+
       <div class="form-actions">
         <a href="{% url 'core:document_list' %}" class="btn-secondary">Cancel</a>
-        <button type="submit" class="btn-primary">Generate →</button>
+        <button type="submit" class="btn-primary" id="submit-btn" onclick="prepareSubmit()">Generate →</button>
       </div>
     </form>
   </div>
 
-  <div class="form-aside">
-    <h3 class="aside-title">How Docify preserves your template</h3>
-    <ol class="aside-steps">
-      <li>The source PDF is analyzed and its <strong>exact HTML structure</strong> is saved as a skeleton — every label, column header, and currency symbol captured literally.</li>
-      <li>Your variable content is matched to the skeleton's placeholder slots.</li>
-      <li>The skeleton is filled with your values. Structure never changes.</li>
-      <li>Playwright renders the final PDF pixel-perfectly.</li>
-    </ol>
-    <div class="aside-note">
-      <strong>What to provide:</strong> only the fields that differ from the original (amounts, client name, date, quantities). Everything else comes from the template.
+  <!-- Aside -->
+  <div class="form-aside" id="form-aside">
+    <div id="aside-content">
+      {% if placeholders %}
+      <h3 class="aside-title">Fields in this template</h3>
+      <div class="aside-ph-list">
+        {% for ph in placeholders %}
+        <div class="aside-ph-item">
+          <span class="aside-ph-dot"></span>
+          <span class="aside-ph-name">{{ ph }}</span>
+        </div>
+        {% endfor %}
+      </div>
+      <div class="aside-note" style="margin-top:12px">
+        These fields were extracted directly from your template PDF.
+      </div>
+      {% else %}
+      <h3 class="aside-title">Style Clone mode</h3>
+      <p style="font-size:13px;color:var(--ink-muted);line-height:1.6">
+        Write your content in any format — plain text, markdown headings, bullet points.
+        Docify reads the template's style and reformats everything to match.
+      </p>
+      <div class="aside-note" style="margin-top:12px">
+        <strong>Tip:</strong> Use headings (#, ##) to help the AI identify sections.
+      </div>
+      {% endif %}
     </div>
-    <div class="aside-note" style="margin-top:10px">
-      <strong>Currency tip:</strong> always specify the currency code (XAF, EUR, USD…) in your content to avoid any ambiguity.
+
+    <div class="aside-note" style="margin-top:16px" id="aside-tip">
+      {% if placeholders %}
+      <strong>Invoice tip:</strong> Only change the fields that differ from the original. Everything else (logo, footer, company details) is preserved automatically.
+      {% else %}
+      <strong>Report tip:</strong> You can paste a full multi-page report. The AI will apply the company's graphic chart style throughout.
+      {% endif %}
     </div>
   </div>
 </div>
+
+<script>
+var PLACEHOLDERS_URL_BASE = "/templates/";
+</script>
+{% verbatim %}
+<script>
+var templateSelect   = document.getElementById('id_template');
+var fieldsSection    = document.getElementById('fields-section');
+var freetextSection  = document.getElementById('freetext-section');
+var fieldsGrid       = document.getElementById('fields-grid');
+var fieldsBadge      = document.getElementById('fields-badge');
+var asideContent     = document.getElementById('aside-content');
+var asideTip         = document.getElementById('aside-tip');
+var bannerFill       = document.getElementById('banner-fill');
+var bannerStyle      = document.getElementById('banner-style');
+
+function toLabel(ph) {
+  return ph.toLowerCase().replace(/_/g, ' ')
+    .replace(/^\w/, function(c) { return c.toUpperCase(); });
+}
+
+function setMode(mode) {
+  if (mode === 'fill') {
+    bannerFill.classList.add('mode-banner-item--active');
+    bannerStyle.classList.remove('mode-banner-item--active');
+  } else {
+    bannerStyle.classList.add('mode-banner-item--active');
+    bannerFill.classList.remove('mode-banner-item--active');
+  }
+}
+
+function renderFields(placeholders, templateName, defaults) {
+  defaults = defaults || {};
+  var hasDefaults = Object.keys(defaults).length > 0;
+
+  if (!placeholders || placeholders.length === 0) {
+    // Style Clone mode
+    fieldsSection.style.display  = 'none';
+    freetextSection.style.display = 'block';
+    fieldsBadge.textContent = '';
+    setMode('style');
+    asideContent.innerHTML =
+      '<h3 class="aside-title">Style Clone mode</h3>' +
+      '<p style="font-size:13px;color:var(--ink-muted);line-height:1.6">' +
+        'Write your content in any format — plain text, markdown headings, bullet points. ' +
+        'Docify reads the template style and reformats everything to match.' +
+      '</p>';
+    asideTip.innerHTML = '<strong>Report tip:</strong> Use headings (#, ##) to help the AI identify sections.';
+    return;
+  }
+
+  // Template Fill mode
+  fieldsSection.style.display  = 'block';
+  freetextSection.style.display = 'none';
+  setMode('fill');
+  fieldsBadge.textContent = placeholders.length + ' field' + (placeholders.length !== 1 ? 's' : '');
+
+  var defaultsNotice = hasDefaults
+    ? '<div class="defaults-notice" id="defaults-notice">' +
+        '<span class="defaults-icon">↩</span>' +
+        'Pre-filled from your last document — edit any field to change it.' +
+        '<button type="button" class="defaults-clear" onclick="clearAllFields()">Clear all</button>' +
+      '</div>'
+    : '';
+
+  fieldsGrid.innerHTML = defaultsNotice + placeholders.map(function(ph) {
+    var val = defaults[ph] || '';
+    return '<div class="ph-field">' +
+      '<label class="ph-label" for="field_' + ph + '">' +
+        toLabel(ph) +
+        ' <span class="ph-token">&#123;&#123;' + ph + '&#125;&#125;</span>' +
+        (val ? '<span class="default-badge">last used</span>' : '') +
+      '</label>' +
+      '<input type="text" name="field_' + ph + '" id="field_' + ph + '" ' +
+             'class="form-input ph-input' + (val ? ' has-default' : '') + '" ' +
+             'autocomplete="off" value="' + val.replace(/"/g, '&quot;') + '" ' +
+             'placeholder="' + toLabel(ph) + '…" ' +
+             'oninput="this.classList.remove(\'has-default\')" />' +
+    '</div>';
+  }).join('');
+
+  applyDefaults(defaults);
+
+  asideContent.innerHTML =
+    '<h3 class="aside-title">Fields — ' + templateName + '</h3>' +
+    '<div class="aside-ph-list">' +
+    placeholders.map(function(ph) {
+      var val = defaults[ph] || '';
+      return '<div class="aside-ph-item">' +
+        '<span class="aside-ph-dot' + (val ? ' aside-ph-dot--filled' : '') + '"></span>' +
+        '<span class="aside-ph-name">' + ph + '</span>' +
+        (val ? '<span class="aside-ph-val">' + val.substring(0, 18) + (val.length > 18 ? '…' : '') + '</span>' : '') +
+      '</div>';
+    }).join('') +
+    '</div>' +
+    '<div class="aside-note" style="margin-top:12px">Only fill in what changes from the original. Everything else is preserved.</div>';
+  asideTip.innerHTML = '<strong>Invoice tip:</strong> Only change the fields that differ. Logo, footer, and company details are preserved automatically.';
+}
+
+function clearAllFields() {
+  document.querySelectorAll('.ph-input').forEach(function(inp) {
+    inp.value = '';
+    inp.classList.remove('has-default');
+  });
+  var notice = document.getElementById('defaults-notice');
+  if (notice) notice.style.display = 'none';
+}
+
+function applyDefaults(defaults) {
+  if (!defaults || !Object.keys(defaults).length) return;
+  var hasAny = false;
+  Object.keys(defaults).forEach(function(ph) {
+    var inp = document.getElementById('field_' + ph);
+    if (inp && defaults[ph]) {
+      inp.value = defaults[ph];
+      inp.classList.add('has-default');
+      hasAny = true;
+    }
+  });
+  var notice = document.getElementById('defaults-notice');
+  if (notice && hasAny) notice.style.display = 'flex';
+}
+
+// Apply server-side defaults on page load
+if (typeof SERVER_DEFAULTS !== 'undefined') {
+  applyDefaults(SERVER_DEFAULTS);
+}
+
+// On template switch, load fields
+if (templateSelect) {
+  templateSelect.addEventListener('change', function() {
+    var opt    = templateSelect.options[templateSelect.selectedIndex];
+    var tmplId = templateSelect.value;
+    var name   = opt ? opt.text.trim() : '';
+    if (!tmplId) {
+      renderFields([], '');
+      return;
+    }
+    fetch(PLACEHOLDERS_URL_BASE + tmplId + '/placeholders/')
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        renderFields(data.placeholders || [], name, data.defaults || {});
+      })
+      .catch(function() { renderFields([], name); });
+  });
+}
+
+// Before submitting: assemble content from whichever mode is active
+function prepareSubmit() {
+  var inFillMode = fieldsSection.style.display !== 'none';
+  var hiddenContent = document.getElementById('content-hidden');
+
+  if (inFillMode) {
+    // Collect field values → KEY: value lines
+    var lines = [];
+    document.querySelectorAll('.ph-input').forEach(function(inp) {
+      // Extract placeholder name from input name="field_KEY"
+      var ph = inp.name.replace(/^field_/, '');
+      var val = inp.value.trim();
+      if (val) lines.push(ph + ': ' + val);
+    });
+    var extra = document.getElementById('extra_fill');
+    if (extra && extra.value.trim()) {
+      lines.push('\n[EXTRA INSTRUCTIONS]\n' + extra.value.trim());
+    }
+    hiddenContent.value = lines.join('\n');
+
+    // Disable the freetext textarea so it's not submitted
+    var freetext = document.getElementById('id_content');
+    if (freetext) freetext.disabled = true;
+  } else {
+    // Style Clone mode — use the freetext content directly
+    var freetext = document.getElementById('id_content');
+    hiddenContent.value = freetext ? freetext.value.trim() : '';
+    if (freetext) freetext.disabled = true;
+  }
+}
+</script>
+{% endverbatim %}
+
+{% if preselect and defaults %}
+<script>
+var SERVER_DEFAULTS = {{ defaults_json }};
+</script>
+{% endif %}
 {% endblock %}

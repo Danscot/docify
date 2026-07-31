@@ -42,3 +42,37 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
 });
+
+// ── Workspace switcher ──────────────────────────────────────────────────────
+(function() {
+  var switcher   = document.getElementById('ws-switcher');
+  var switcherBtn = document.getElementById('ws-switcher-btn');
+  var dropdown   = document.getElementById('ws-dropdown');
+
+  if (switcherBtn) {
+    switcherBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      switcher.classList.toggle('open');
+      userMenu.classList.remove('open');
+    });
+  }
+
+  // ── User menu ─────────────────────────────────────────────────────────────
+  var userMenu   = document.getElementById('sidebar-user') || { classList: { remove: function(){} } };
+  var userBtn    = document.getElementById('user-menu-btn');
+  var userDrop   = document.getElementById('user-dropdown');
+
+  if (userBtn) {
+    userBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      userMenu.classList.toggle('open');
+      if (switcher) switcher.classList.remove('open');
+    });
+  }
+
+  // Close both on outside click
+  document.addEventListener('click', function() {
+    if (switcher) switcher.classList.remove('open');
+    if (userMenu) userMenu.classList.remove('open');
+  });
+})();

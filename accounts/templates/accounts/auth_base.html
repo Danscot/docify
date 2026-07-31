@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}Docify{% endblock %}</title>
+  {% load static %}
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Syne:wght@700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="{% static 'css/main.css' %}" />
+  <link rel="stylesheet" href="{% static 'css/auth.css' %}" />
+</head>
+<body class="auth-body">
+
+<div class="auth-shell">
+  <aside class="auth-brand">
+    <div class="auth-brand-logo">
+      <span class="logo-mark">D</span>
+      <span class="logo-text">Docify</span>
+    </div>
+    <blockquote class="auth-brand-quote">
+      "Copy the style.<br>Change the numbers."
+    </blockquote>
+    <ul class="auth-brand-features">
+      <li>Upload any PDF template</li>
+      <li>AI extracts the exact style</li>
+      <li>Generate unlimited documents</li>
+      <li>FCFA, XAF, EUR — all formats</li>
+    </ul>
+  </aside>
+
+  <main class="auth-main">
+    <div class="auth-card">
+      {% if messages %}
+      <div class="auth-messages">
+        {% for msg in messages %}
+        <div class="message message--{{ msg.tags }}">{{ msg }}</div>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      {% block auth_content %}{% endblock %}
+    </div>
+  </main>
+</div>
+
+</body>
+</html>

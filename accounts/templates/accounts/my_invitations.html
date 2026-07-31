@@ -1,0 +1,61 @@
+{% extends "core/base.html" %}
+{% block title %}My Invitations — Docify{% endblock %}
+{% block breadcrumb %}<a href="{% url 'accounts:profile' %}">Profile</a> <span>/ Invitations</span>{% endblock %}
+
+{% block content %}
+<div class="section" style="max-width:680px">
+  <div class="section-header" style="margin-bottom:20px">
+    <h2 class="section-title">Pending Invitations</h2>
+  </div>
+
+  {% if pending_invitations %}
+  <div class="inv-list">
+    {% for inv in pending_invitations %}
+    <div class="inv-card">
+      <div class="inv-card-header">
+        <div class="inv-ws-logo">
+          {% if inv.workspace.logo %}
+          <img src="{{ inv.workspace.logo.url }}" alt="" />
+          {% else %}
+          {{ inv.workspace.name.0 }}
+          {% endif %}
+        </div>
+        <div class="inv-info">
+          <div class="inv-ws-name">{{ inv.workspace.name }}</div>
+          <div class="inv-meta">
+            Invited by <strong>{{ inv.invited_by.get_full_name|default:inv.invited_by.email }}</strong>
+            &nbsp;·&nbsp; as <strong>{{ inv.get_role_display }}</strong>
+            &nbsp;·&nbsp; {{ inv.created_at|date:"M d, Y" }}
+          </div>
+          {% if inv.is_expired %}
+          <div class="inv-expired">This invitation has expired</div>
+          {% endif %}
+        </div>
+        <span class="badge badge--analyzing">Pending</span>
+      </div>
+
+      {% if inv.is_valid %}
+      <div class="inv-card-actions">
+        <form method="post" action="{% url 'accounts:invitation_respond' inv.token %}" class="inline-form">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="accept" />
+          <button type="submit" class="btn-primary btn-sm">Accept &amp; join</button>
+        </form>
+        <form method="post" action="{% url 'accounts:invitation_respond' inv.token %}" class="inline-form">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="decline" />
+          <button type="submit" class="btn-secondary btn-sm">Decline</button>
+        </form>
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+
+  {% else %}
+  <div class="empty-state">
+    <p>No pending invitations. When someone invites you to a workspace, it will appear here.</p>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

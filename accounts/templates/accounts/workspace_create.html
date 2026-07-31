@@ -1,0 +1,35 @@
+{% extends "accounts/auth_base.html" %}
+{% block title %}New Workspace — Docify{% endblock %}
+{% block auth_content %}
+<h1 class="auth-title">Create a workspace</h1>
+<p class="auth-sub">A workspace holds your templates, documents, and team members.</p>
+<form method="post" class="auth-form">
+  {% csrf_token %}
+  <div class="field">
+    <label class="field-label">Workspace name</label>
+    <input type="text" name="name" class="form-input" placeholder="Acme Corp" autofocus required />
+  </div>
+  <div class="field">
+    <label class="field-label">Type</label>
+    <div class="type-cards">
+      <label class="type-card type-card--active" id="card-team">
+        <input type="radio" name="type" value="team" checked />
+        <div class="type-card-inner">
+          <div class="type-icon">👥</div>
+          <div class="type-name">Team</div>
+          <div class="type-desc">Invite colleagues, share templates.</div>
+        </div>
+      </label>
+      <label class="type-card" id="card-personal">
+        <input type="radio" name="type" value="personal" />
+        <div class="type-card-inner">
+          <div class="type-icon">👤</div>
+          <div class="type-name">Personal</div>
+          <div class="type-desc">Just for you.</div>
+        </div>
+      </label>
+    </div>
+  </div>
+  <button type="submit" class="btn-primary auth-submit">Create workspace</button>
+</form>
+{% endblock %}

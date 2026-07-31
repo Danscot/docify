@@ -1,0 +1,84 @@
+{% extends "accounts/auth_base.html" %}
+{% block title %}Create account — Docify{% endblock %}
+
+{% block auth_content %}
+<h1 class="auth-title">Create your account</h1>
+<p class="auth-sub">Start generating documents at scale.</p>
+
+<form method="post" class="auth-form">
+  {% csrf_token %}
+
+  <div class="field-row">
+    <div class="field">
+      <label class="field-label">First name</label>
+      {{ form.first_name }}
+      {% if form.first_name.errors %}<div class="field-error">{{ form.first_name.errors.0 }}</div>{% endif %}
+    </div>
+    <div class="field">
+      <label class="field-label">Last name</label>
+      {{ form.last_name }}
+      {% if form.last_name.errors %}<div class="field-error">{{ form.last_name.errors.0 }}</div>{% endif %}
+    </div>
+  </div>
+
+  <div class="field">
+    <label class="field-label">Email</label>
+    {{ form.email }}
+    {% if form.email.errors %}<div class="field-error">{{ form.email.errors.0 }}</div>{% endif %}
+  </div>
+
+  <div class="field">
+    <label class="field-label">Password</label>
+    {{ form.password }}
+    {% if form.password.errors %}<div class="field-error">{{ form.password.errors.0 }}</div>{% endif %}
+  </div>
+
+  <!-- Account type -->
+  <div class="field">
+    <label class="field-label">Account type</label>
+    <div class="type-cards" id="type-cards">
+      <label class="type-card" id="card-personal">
+        <input type="radio" name="account_type" value="personal" checked />
+        <div class="type-card-inner">
+          <div class="type-icon">👤</div>
+          <div class="type-name">Personal</div>
+          <div class="type-desc">Just for you. One workspace.</div>
+        </div>
+      </label>
+      <label class="type-card" id="card-team">
+        <input type="radio" name="account_type" value="team" />
+        <div class="type-card-inner">
+          <div class="type-icon">👥</div>
+          <div class="type-name">Team</div>
+          <div class="type-desc">Invite colleagues, share templates.</div>
+        </div>
+      </label>
+    </div>
+  </div>
+
+  <div class="field" id="team-name-field" style="display:none">
+    <label class="field-label">Team / Company name</label>
+    {{ form.team_name }}
+    {% if form.team_name.errors %}<div class="field-error">{{ form.team_name.errors.0 }}</div>{% endif %}
+  </div>
+
+  <button type="submit" class="btn-primary auth-submit">Create account</button>
+</form>
+
+<p class="auth-link">Already have an account? <a href="{% url 'accounts:login' %}">Sign in</a></p>
+
+<script>
+var radios = document.querySelectorAll('input[name="account_type"]');
+var teamField = document.getElementById('team-name-field');
+var cardPersonal = document.getElementById('card-personal');
+var cardTeam = document.getElementById('card-team');
+function updateType() {
+  var val = document.querySelector('input[name="account_type"]:checked').value;
+  teamField.style.display = val === 'team' ? 'block' : 'none';
+  cardPersonal.classList.toggle('type-card--active', val === 'personal');
+  cardTeam.classList.toggle('type-card--active', val === 'team');
+}
+radios.forEach(function(r) { r.addEventListener('change', updateType); });
+updateType();
+</script>
+{% endblock %}

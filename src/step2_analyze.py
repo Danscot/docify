@@ -124,35 +124,155 @@ def _image_parts(sampled: list) -> list:
 
 # ── Pass A ────────────────────────────────────────────────────────────────────
 
-STYLE_PROMPT = """Analyze these PDF pages. Return ONLY valid JSON — no markdown, no text:
+# Safe defaults used when the model returns truncated/unparseable JSON.
+# Colors are cosmetic — wrong defaults are infinitely better than a crash.
+_STYLE_DEFAULTS = {
+    "styles": {
+        "primary_color": "#000000",
+        "secondary_color": "#B0C4DE",
+        "background_color": "#FFFFFF",
+        "text_color": "#000000",
+        "font_family": "Arial, Helvetica, sans-serif",
+        "font_size_body": "11pt",
+        "font_size_heading": "16pt",
+        "font_size_subheading": "13pt",
+        "line_height": "1.5",
+        "page_margin": "20mm",
+        "table_border_color": "#AAAAAA",
+        "table_header_bg": "#000000",
+        "table_header_text": "#FFFFFF",
+    },
+    "layout": {
+        "has_header": True,
+        "header_bg_color": None,
+        "header_text_color": "#000000",
+        "has_footer": True,
+        "footer_bg_color": None,
+        "columns": 1,
+        "page_size": "A4",
+    },
+    "has_logo": True,
+    "logo_position": "top-left",
+    "has_images": False,
+}
+
+STYLE_PROMPT = """
+Analyze these PDF page images and extract the visual style.
+Output ONLY a valid JSON object. No markdown, no explanation, no thinking.
+Use exactly this structure:
 {
   "styles": {
-    "primary_color":"<hex>","secondary_color":"<hex>","background_color":"<hex>",
-    "text_color":"<hex>","font_family":"<safe CSS stack>",
-    "font_size_body":"<pt>","font_size_heading":"<pt>","font_size_subheading":"<pt>",
-    "line_height":"<number>","page_margin":"<mm>",
-    "table_border_color":"<hex>","table_header_bg":"<hex>","table_header_text":"<hex>"
+    "primary_color": "#hex", "secondary_color": "#hex",
+    "background_color": "#hex", "text_color": "#hex",
+    "font_family": "Arial, sans-serif",
+    "font_size_body": "11pt", "font_size_heading": "16pt",
+    "font_size_subheading": "13pt", "line_height": "1.5",
+    "page_margin": "20mm", "table_border_color": "#hex",
+    "table_header_bg": "#hex", "table_header_text": "#hex"
   },
-  "layout":{
-    "has_header":true,"header_bg_color":"<hex or null>","header_text_color":"<hex>",
-    "has_footer":true,"footer_bg_color":"<hex or null>","columns":1,"page_size":"A4"
+  "layout": {
+    "has_header": true, "header_bg_color": null,
+    "header_text_color": "#hex", "has_footer": true,
+    "footer_bg_color": null, "columns": 1, "page_size": "A4"
   },
-  "has_logo":true,"logo_position":"top-left","has_images":false
-}"""
+  "has_logo": true, "logo_position": "top-left", "has_images": false
+}
+"""
+
+
+
+def _extract_json_from_anywhere(raw: str) -> dict:
+    """
+    Try to extract JSON from a model response using every strategy:
+    1. After stripping thinking blocks
+    2. Inside the thinking block (model put it there before truncation)
+    3. Largest parseable JSON fragment (handles token-truncated output)
+    Raises ValueError only if nothing works.
+    """
+    import re as _re
+
+    def _try_parse(text: str) -> dict:
+        text = text.strip()
+        if not text:
+            raise ValueError("empty")
+        # Strip ``` fences
+        if "```" in text:
+            for part in text.split("```"):
+                p = part.strip()
+                if p.startswith("json"): p = p[4:].strip()
+                if p.startswith("{"): text = p; break
+        # Find outermost {}
+        s, e = text.find("{"), text.rfind("}")
+        if s != -1 and e != -1:
+            candidate = text[s:e+1]
+            candidate = _re.sub(r',\s*([}\]])', r'\1', candidate)
+            return json.loads(candidate)
+        raise ValueError("no JSON object found")
+
+    # Capture thought block content before stripping
+    thought_content = ""
+    m = _re.search(r'<(?:thought|thinking)[^>]*>(.*?)</(?:thought|thinking)>',
+                   raw, flags=_re.DOTALL | _re.IGNORECASE)
+    if m:
+        thought_content = m.group(1)
+    # Also grab unclosed block content
+    m2 = _re.search(r'<(?:thought|thinking)[^>]*>(.*)', raw,
+                    flags=_re.DOTALL | _re.IGNORECASE)
+    if m2 and len(m2.group(1)) > len(thought_content):
+        thought_content = m2.group(1)
+
+    stripped = _strip_thinking(raw)
+
+    # Strategy 1: clean output after thinking
+    try:
+        return _try_parse(stripped)
+    except Exception:
+        pass
+
+    # Strategy 2: JSON was inside the thought block
+    if thought_content:
+        try:
+            return _try_parse(thought_content)
+        except Exception:
+            pass
+
+    # Strategy 3: token-truncated JSON — try largest parseable prefix
+    for text in [stripped, thought_content, raw]:
+        s = text.find("{")
+        if s == -1:
+            continue
+        fragment = text[s:]
+        for i in range(len(fragment) - 1, -1, -1):
+            if fragment[i] == "}":
+                try:
+                    candidate = _re.sub(r',\s*([}\]])', r'\1', fragment[:i+1])
+                    return json.loads(candidate)
+                except Exception:
+                    continue
+
+    raise ValueError("No parseable JSON found in model response")
 
 
 def _pass_a(client, img_parts, model) -> dict:
-    log.info("[Step 2] Pass A — styles")
+    log.info("[Step 2] Pass A — styles (max_tokens=8192 to survive thinking overhead)")
     t0 = time.time()
     resp = client.chat.completions.create(
         model=model,
-        messages=[{"role":"user","content": img_parts + [{"type":"text","text":STYLE_PROMPT}]}],
-        max_tokens=4096,
+        messages=[{"role": "user", "content": img_parts + [{"type": "text", "text": STYLE_PROMPT}]}],
+        max_tokens=8192,   # was 1024 — thinking consumed all tokens leaving no room for JSON
     )
-    log.info("[Step 2] Pass A done %.1fs", time.time()-t0)
+    log.info("[Step 2] Pass A done %.1fs", time.time() - t0)
     raw = resp.choices[0].message.content or ""
-    log.debug("[Step 2] Pass A: %s", raw[:300])
-    return _extract_json(raw)
+    log.debug("[Step 2] Pass A raw (first 300): %s", raw[:300])
+
+    try:
+        result = _extract_json_from_anywhere(raw)
+        log.info("[Step 2] Pass A parsed OK — primary_color=%s",
+                 result.get("styles", {}).get("primary_color", "?"))
+        return result
+    except Exception as e:
+        log.warning("[Step 2] Pass A JSON parse failed (%s) — using safe defaults", e)
+        return _STYLE_DEFAULTS
 
 
 # ── Pass B ────────────────────────────────────────────────────────────────────

@@ -1,0 +1,190 @@
+{% extends "core/base.html" %}
+{% block title %}{{ ws.name }} Settings — Docify{% endblock %}
+{% block breadcrumb %}<a href="{% url 'accounts:profile' %}">Profile</a> <span>/ {{ ws.name }}</span>{% endblock %}
+
+{% block content %}
+<div class="two-col">
+
+  <!-- Left: settings + invite -->
+  <div>
+    <div class="form-card">
+      <h2 class="form-title" style="font-size:17px;margin-bottom:20px">Workspace settings</h2>
+      <form method="post" enctype="multipart/form-data" class="form">
+        {% csrf_token %}
+        <div class="field">
+          <label class="field-label">Workspace name</label>
+          {{ form.name }}
+        </div>
+        <div class="field">
+          <label class="field-label">Logo</label>
+          {{ form.logo }}
+          {% if ws.logo %}<img src="{{ ws.logo.url }}" style="height:48px;margin-top:8px;border-radius:6px" alt="" />{% endif %}
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="btn-primary">Save</button>
+        </div>
+      </form>
+    </div>
+
+    {% if ws.is_team %}
+    <div class="form-card" style="margin-top:20px">
+      <h2 class="form-title" style="font-size:17px;margin-bottom:4px">Invite people</h2>
+      <p style="font-size:13px;color:var(--ink-muted);margin-bottom:16px">
+        Works for existing Docify users (added instantly) and new users (receive a link).
+      </p>
+      <form method="post" action="{% url 'accounts:invite_send' ws.pk %}" class="form" id="invite-form">
+        {% csrf_token %}
+
+        <div class="field">
+          <label class="field-label">Email address</label>
+          <div style="position:relative">
+            {{ invite_form.email }}
+            <div class="user-lookup" id="user-lookup" style="display:none"></div>
+          </div>
+          {% if invite_form.email.errors %}<div class="field-error">{{ invite_form.email.errors.0 }}</div>{% endif %}
+        </div>
+
+        <div class="field">
+          <label class="field-label">Role</label>
+          <div class="role-options">
+            {% for radio in invite_form.role %}
+            <label class="role-option">
+              {{ radio.tag }}
+              <div class="role-option-body">
+                <span class="role-option-name">{{ radio.choice_label|truncatewords:1 }}</span>
+                <span class="role-option-desc">{{ radio.choice_label }}</span>
+              </div>
+            </label>
+            {% endfor %}
+          </div>
+        </div>
+
+        <button type="submit" class="btn-primary">Send invitation</button>
+      </form>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- Right: members + pending invites -->
+  <div>
+    <div class="form-card">
+      <h2 class="form-title" style="font-size:17px;margin-bottom:16px">
+        Members <span style="font-size:13px;font-weight:400;color:var(--ink-muted)">({{ members.count }})</span>
+      </h2>
+      <div class="member-list">
+        {% for m in members %}
+        <div class="member-row">
+          <div class="member-left">
+            <div class="avatar-sm avatar-initials">
+              {% with m.user.get_full_name as name %}{% if name %}{{ name.0 }}{% else %}{{ m.user.email.0|upper }}{% endif %}{% endwith %}
+            </div>
+            <div>
+              <div class="member-name">
+                {{ m.user.get_full_name|default:m.user.email }}
+                {% if m.user == request.user %}<span class="badge-you">you</span>{% endif %}
+              </div>
+              <div class="member-email">{{ m.user.email }}</div>
+            </div>
+          </div>
+          <div class="member-right">
+            {% if can_manage and not m.is_owner and m.user != request.user %}
+            <form method="post" action="{% url 'accounts:member_role_change' ws.pk m.user.pk %}" class="inline-form">
+              {% csrf_token %}
+              <select name="role" class="form-select role-select" onchange="this.form.submit()">
+                <option value="admin"  {% if m.role == 'admin'  %}selected{% endif %}>Admin</option>
+                <option value="member" {% if m.role == 'member' %}selected{% endif %}>Member</option>
+              </select>
+            </form>
+            <form method="post" action="{% url 'accounts:member_remove' ws.pk m.user.pk %}" class="inline-form"
+                  onsubmit="return confirm('Remove {{ m.user.email }}?')">
+              {% csrf_token %}
+              <button class="btn-sm btn-danger">Remove</button>
+            </form>
+            {% else %}
+            <span class="badge badge--{% if m.is_owner %}ready{% else %}pending{% endif %}">{{ m.get_role_display }}</span>
+            {% endif %}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    {% if invitations %}
+    <div class="form-card" style="margin-top:20px">
+      <h2 class="form-title" style="font-size:17px;margin-bottom:16px">Pending invitations</h2>
+      <div class="member-list">
+        {% for inv in invitations %}
+        <div class="member-row">
+          <div class="member-left">
+            <div class="avatar-sm avatar-initials" style="background:var(--amber-bg);color:var(--amber)">{{ inv.email.0|upper }}</div>
+            <div>
+              <div class="member-name">{{ inv.email }}</div>
+              <div class="member-email">
+                Invited {{ inv.created_at|date:"M d" }} · expires {{ inv.expires_at|date:"M d" }}
+                {% if inv.invited_user_exists %}· <span style="color:var(--green)">Docify user — awaiting acceptance</span>{% endif %}
+              </div>
+            </div>
+          </div>
+          <div class="member-right">
+            <span class="badge badge--analyzing">{{ inv.get_role_display }}</span>
+            <form method="post" action="{% url 'accounts:invite_cancel' ws.pk inv.token %}" class="inline-form">
+              {% csrf_token %}
+              <button class="btn-sm btn-danger">Cancel</button>
+            </form>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Live user lookup JS -->
+<script>
+var emailInput = document.getElementById('id_email');
+var lookup     = document.getElementById('user-lookup');
+
+if (emailInput) {
+  var debounceTimer;
+  emailInput.addEventListener('input', function() {
+    clearTimeout(debounceTimer);
+    var val = emailInput.value.trim();
+    if (val.length < 4 || !val.includes('@')) {
+      lookup.style.display = 'none';
+      return;
+    }
+    debounceTimer = setTimeout(function() {
+      fetch('/accounts/users/lookup/?email=' + encodeURIComponent(val))
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          if (data.found) {
+            lookup.innerHTML =
+              '<div class="user-lookup-result">' +
+                '<div class="user-lookup-avatar">' + data.initials + '</div>' +
+                '<div>' +
+                  '<div class="user-lookup-name">' + data.name + '</div>' +
+                  '<div class="user-lookup-hint">Already on Docify — will be added instantly</div>' +
+                '</div>' +
+                '<svg viewBox="0 0 20 20" fill="currentColor" style="width:16px;color:#16a34a"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>' +
+              '</div>';
+            lookup.style.display = 'block';
+          } else {
+            lookup.innerHTML =
+              '<div class="user-lookup-result user-lookup-result--new">' +
+                '<svg viewBox="0 0 20 20" fill="currentColor" style="width:16px;color:#6b7280"><path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z"/><path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z"/></svg>' +
+                '<div class="user-lookup-hint">Not on Docify yet — they\'ll receive an invitation link</div>' +
+              '</div>';
+            lookup.style.display = 'block';
+          }
+        })
+        .catch(function() { lookup.style.display = 'none'; });
+    }, 350);
+  });
+
+  document.addEventListener('click', function(e) {
+    if (!emailInput.contains(e.target)) lookup.style.display = 'none';
+  });
+}
+</script>
+{% endblock %}

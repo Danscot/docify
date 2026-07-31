@@ -1,0 +1,24 @@
+{% extends "accounts/auth_base.html" %}
+{% block title %}Sign in — Docify{% endblock %}
+{% block auth_content %}
+<h1 class="auth-title">Welcome back</h1>
+<p class="auth-sub">Sign in to your Docify account.</p>
+
+<form method="post" class="auth-form">
+  {% csrf_token %}
+  <div class="field">
+    <label class="field-label">Email</label>
+    {{ form.username }}
+  </div>
+  <div class="field">
+    <label class="field-label">Password</label>
+    {{ form.password }}
+  </div>
+  {% if form.non_field_errors %}
+  <div class="field-error">{{ form.non_field_errors.0 }}</div>
+  {% endif %}
+  <button type="submit" class="btn-primary auth-submit">Sign in</button>
+</form>
+
+<p class="auth-link">Don't have an account? <a href="{% url 'accounts:signup' %}">Create one free</a></p>
+{% endblock %}
