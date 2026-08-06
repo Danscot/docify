@@ -83,7 +83,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # Pipeline config
 GEMMA_API_KEY    = os.getenv("GEMMA_API_KEY", "")
 GEMMA_BASE_URL   = os.getenv("GEMMA_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/")
-GEMMA_MODEL      = os.getenv("GEMMA_MODEL", "gemini-2.0-flash")
+GEMMA_MODEL      = os.getenv("GEMMA_MODEL", "gemma-4-31b-it")
 
 UPLOADS_DIR   = MEDIA_ROOT / "uploads"
 TEMPLATES_DIR = MEDIA_ROOT / "templates"

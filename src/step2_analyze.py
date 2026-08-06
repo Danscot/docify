@@ -1,11 +1,12 @@
 """
 Step 2 — Two-pass vision analysis: styles + HTML skeleton.
 
-ANTI-HALLUCINATION DESIGN:
-- Pass A: extract style tokens (colors, fonts) — fast, <1K tokens output
-- Pass B: extract literal HTML skeleton with {{PLACEHOLDERS}} for variable fields
-  The prompt uses concrete negative examples to prevent the most common failures:
-  currency substitution, company name invention, column header changes.
+IMAGE STRATEGY:
+- Pass A: extract style tokens (colors, fonts)
+- Pass B: extract HTML skeleton — AI marks logo position with a sentinel
+           placeholder like [LOGO] or leaves an <img> tag
+- Post-process: we replace all logo/image references with real base64
+  data URIs from the extracted assets. AI never sees or handles base64.
 """
 import base64
 import json
@@ -15,6 +16,7 @@ import time
 from pathlib import Path
 
 import httpx
+from src._streaming import stream_completion
 
 log = logging.getLogger("docify.step2")
 
@@ -22,6 +24,8 @@ MAX_PAGES      = 6
 API_CONNECT_TO = 10
 API_READ_TO    = 180
 
+
+# ── Helpers ────────────────────────────────────────────────────────────────────
 
 def _encode_image(path: str) -> str:
     with open(path, "rb") as f:
@@ -42,26 +46,18 @@ def _make_client():
 
 
 def _strip_thinking(raw: str) -> str:
-    """
-    Remove <thought>...</thought> and <thinking>...</thinking> blocks.
-    Gemini with extended thinking emits these before the actual output.
-    They contain the model's chain-of-thought which breaks JSON parsing.
-    """
-    import re as _re
-    text = _re.sub(r'<thought[^>]*>.*?</thought[^>]*>', '', raw,  flags=_re.DOTALL | _re.IGNORECASE)
-    text = _re.sub(r'<thinking[^>]*>.*?</thinking[^>]*>', '', text, flags=_re.DOTALL | _re.IGNORECASE)
-    # Handle truncated/unclosed thinking blocks at end of response
-    text = _re.sub(r'<thought[^>]*>.*',  '', text, flags=_re.DOTALL | _re.IGNORECASE)
-    text = _re.sub(r'<thinking[^>]*>.*', '', text, flags=_re.DOTALL | _re.IGNORECASE)
+    """Remove <thought>/<thinking> blocks that some models emit."""
+    text = re.sub(r'<thought[^>]*>.*?</thought[^>]*>', '', raw,  flags=re.DOTALL|re.IGNORECASE)
+    text = re.sub(r'<thinking[^>]*>.*?</thinking[^>]*>', '', text, flags=re.DOTALL|re.IGNORECASE)
+    text = re.sub(r'<thought[^>]*>.*',  '', text, flags=re.DOTALL|re.IGNORECASE)
+    text = re.sub(r'<thinking[^>]*>.*', '', text, flags=re.DOTALL|re.IGNORECASE)
     result = text.strip()
     if len(result) < len(raw.strip()):
-        log.info("[Step 2] Stripped %d chars of model thinking",
-                 len(raw.strip()) - len(result))
+        log.info("[Step 2] Stripped %d chars of model thinking", len(raw.strip()) - len(result))
     return result
 
 
 def _extract_json(raw: str) -> dict:
-    # Strip thinking blocks FIRST — they cause unterminated string JSON errors
     text = _strip_thinking(raw).strip()
     if "```" in text:
         for part in text.split("```"):
@@ -74,14 +70,11 @@ def _extract_json(raw: str) -> dict:
     try:
         return json.loads(text)
     except json.JSONDecodeError:
-        import re as _re
-        # Remove trailing commas before } or ] and retry
-        text = _re.sub(r',(\s*[}\]])', r'\1', text)
+        text = re.sub(r',(\s*[}\]])', r'\1', text)
         return json.loads(text)
 
 
 def _strip_fences(raw: str) -> str:
-    # Strip thinking blocks before fence detection
     text = _strip_thinking(raw).strip()
     if text.startswith("```"):
         lines = text.split("\n")
@@ -104,11 +97,14 @@ def _sample_pages(paths: list) -> list:
 
 
 def _load_asset_paths(pages_dir: Path) -> list:
+    """Load extracted assets from step1 manifest."""
     manifest = pages_dir.parent / "assets" / "manifest.json"
-    if not manifest.exists(): return []
+    if not manifest.exists():
+        log.info("[Step 2] No asset manifest found at %s", manifest)
+        return []
     assets = json.loads(manifest.read_text())
     valid = [a for a in assets if Path(a["path"]).exists()]
-    log.info("[Step 2] Assets on disk: %d", len(valid))
+    log.info("[Step 2] Assets on disk: %d/%d", len(valid), len(assets))
     return valid
 
 
@@ -117,47 +113,168 @@ def _image_parts(sampled: list) -> list:
     for i, p in enumerate(sampled):
         b64 = _encode_image(p)
         parts.append({"type":"image_url","image_url":{"url":f"data:image/png;base64,{b64}"}})
-        log.info("[Step 2]   page %d/%d: %s (%dKB)", i+1, len(sampled),
-                 Path(p).name, Path(p).stat().st_size//1024)
+        log.info("[Step 2]   page %d/%d: %s (%dKB)",
+                 i+1, len(sampled), Path(p).name, Path(p).stat().st_size//1024)
     return parts
 
 
-# ── Pass A ────────────────────────────────────────────────────────────────────
+# ── Asset injection — the key fix ──────────────────────────────────────────────
 
-# Safe defaults used when the model returns truncated/unparseable JSON.
-# Colors are cosmetic — wrong defaults are infinitely better than a crash.
-_STYLE_DEFAULTS = {
-    "styles": {
-        "primary_color": "#000000",
-        "secondary_color": "#B0C4DE",
-        "background_color": "#FFFFFF",
-        "text_color": "#000000",
-        "font_family": "Arial, Helvetica, sans-serif",
-        "font_size_body": "11pt",
-        "font_size_heading": "16pt",
-        "font_size_subheading": "13pt",
-        "line_height": "1.5",
-        "page_margin": "20mm",
-        "table_border_color": "#AAAAAA",
-        "table_header_bg": "#000000",
-        "table_header_text": "#FFFFFF",
-    },
-    "layout": {
-        "has_header": True,
-        "header_bg_color": None,
-        "header_text_color": "#000000",
-        "has_footer": True,
-        "footer_bg_color": None,
-        "columns": 1,
-        "page_size": "A4",
-    },
-    "has_logo": True,
-    "logo_position": "top-left",
-    "has_images": False,
-}
+def _inject_assets_into_skeleton(skeleton_html: str, assets: list) -> str:
+    """
+    Replace ALL logo/image references in the skeleton with real base64 data URIs.
 
-STYLE_PROMPT = """
-Analyze these PDF page images and extract the visual style.
+    The AI may produce any of these patterns for a logo:
+      - [LOGO] sentinel text
+      - <img src="[LOGO]"> or <img src="LOGO">
+      - <img src="file:///..."> with the actual path
+      - <img src="logo.png"> or any placeholder filename
+      - An empty <img> tag
+
+    We handle all of them, plus we scan for existing <img> tags whose src
+    isn't already a data: URI and replace them.
+    """
+    if not assets:
+        log.info("[Step 2] No assets to inject")
+        return skeleton_html
+
+    # Build base64 data URIs for each asset
+    asset_uris = []
+    for a in assets:
+        p = Path(a["path"])
+        if not p.exists():
+            log.warning("[Step 2] Asset not found: %s", p)
+            continue
+        ext = a.get("ext", "jpeg").lower()
+        mime = {
+            "jpeg": "image/jpeg", "jpg": "image/jpeg",
+            "png":  "image/png",  "gif": "image/gif",
+            "webp": "image/webp",
+        }.get(ext, "image/jpeg")
+        b64  = base64.b64encode(p.read_bytes()).decode()
+        uri  = f"data:{mime};base64,{b64}"
+        asset_uris.append({
+            **a,
+            "uri":  uri,
+            "mime": mime,
+            "is_logo": a.get("width", 0) < 300 and a.get("height", 0) < 300,
+        })
+        log.info("[Step 2]   Encoded asset: %s (%dx%d, %dKB b64)",
+                 p.name, a.get("width",0), a.get("height",0), len(b64)//1024)
+
+    if not asset_uris:
+        return skeleton_html
+
+    logo_uri  = asset_uris[0]["uri"]
+    logo_mime = asset_uris[0]["mime"]
+    logo_w    = assets[0].get("width", 80)
+    logo_h    = assets[0].get("height", 80)
+
+    # Sensible display size for logo
+    display_h = min(logo_h, 80)
+    display_w = int(logo_w * display_h / logo_h) if logo_h else 80
+
+    logo_img_tag = (
+        f'<img src="{logo_uri}" '
+        f'style="width:{display_w}px;height:{display_h}px;object-fit:contain;" '
+        f'alt="logo" />'
+    )
+
+    html = skeleton_html
+
+    # ── Strategy 1: replace [LOGO] text sentinel ───────────────────────────
+    if "[LOGO]" in html:
+        log.info("[Step 2] Replacing [LOGO] sentinel")
+        html = html.replace("[LOGO]", logo_img_tag)
+
+    # ── Strategy 2: replace <img> tags with non-data src ──────────────────
+    # Find all <img> tags whose src is NOT already a data: URI
+    def replace_img(m):
+        tag = m.group(0)
+        src_match = re.search(r'src=["\']([^"\']*)["\']', tag)
+        if not src_match:
+            # No src at all — inject logo
+            return logo_img_tag
+        src = src_match.group(1)
+        if src.startswith("data:"):
+            return tag   # already a data URI, leave it
+        if "file://" in src:
+            # AI used a file:// path — replace with the matching asset or logo
+            matched_uri = _match_asset_by_path(src, asset_uris) or logo_uri
+            return re.sub(r'src=["\'][^"\']*["\']', f'src="{matched_uri}"', tag)
+        # Generic placeholder filename (logo.png, image.jpg, etc.)
+        return logo_img_tag
+
+    html = re.sub(r'<img\b[^>]*>', replace_img, html, flags=re.IGNORECASE)
+
+    # ── Strategy 3: inject logo if no <img> tag exists at all ─────────────
+    if "<img" not in html.lower():
+        log.warning("[Step 2] No <img> tag in skeleton — injecting logo into header")
+        # Try to find the header div and prepend the logo
+        header_match = re.search(
+            r'(<(?:div|header)[^>]*(?:header|logo)[^>]*>)',
+            html, flags=re.IGNORECASE
+        )
+        if header_match:
+            insert_pos = header_match.end()
+            html = html[:insert_pos] + "\n  " + logo_img_tag + "\n" + html[insert_pos:]
+        else:
+            # Fallback: insert right after <body>
+            html = re.sub(
+                r'(<body[^>]*>)',
+                r'\1\n<div style="padding:10px">' + logo_img_tag + '</div>',
+                html, flags=re.IGNORECASE
+            )
+
+    log.info("[Step 2] Asset injection complete — %d asset(s) processed", len(asset_uris))
+    return html
+
+
+def _match_asset_by_path(file_url: str, asset_uris: list) -> str | None:
+    """Try to match a file:// URL to one of our extracted assets by filename."""
+    fname = Path(file_url.replace("file://", "")).name.lower()
+    for a in asset_uris:
+        if Path(a["path"]).name.lower() == fname:
+            return a["uri"]
+    return None
+
+
+# ── Skeleton sanitizer ─────────────────────────────────────────────────────────
+
+_THINKING_MARKERS = [
+    "the user wants", "let me ", "i need to", "looking at",
+    "looking closer", "let's refine", "wait,", "-> ",
+    "the currency", "must be kept",
+]
+
+def _sanitize_skeleton(html: str) -> tuple:
+    warnings = []
+    lower = html.lower()
+    body_start = lower.find("<body")
+    if body_start == -1: body_start = 0
+    body_content = lower[body_start:]
+
+    contaminated = [m for m in _THINKING_MARKERS if m in body_content]
+    if contaminated:
+        warnings.append(f"Model reasoning leaked into skeleton: {contaminated[:3]}")
+        log.warning("[Step 2] ⚠ Skeleton contamination: %s", contaminated[:3])
+
+    if not html.strip().lower().startswith(("<!doctype", "<html")):
+        raise ValueError(
+            "Skeleton does not start with <!DOCTYPE html> — "
+            "model returned reasoning text instead of HTML. Re-analyze."
+        )
+    if contaminated:
+        raise ValueError(
+            f"AI reasoning text leaked into skeleton ({contaminated[0]!r}). "
+            "Re-analyze the template."
+        )
+    return html, warnings
+
+
+# ── Pass A: styles ─────────────────────────────────────────────────────────────
+
+STYLE_PROMPT = """Analyze these PDF page images and extract the visual style.
 Output ONLY a valid JSON object. No markdown, no explanation, no thinking.
 Use exactly this structure:
 {
@@ -179,95 +296,79 @@ Use exactly this structure:
 }
 """
 
+_STYLE_DEFAULTS = {
+    "styles": {
+        "primary_color": "#000000", "secondary_color": "#B0C4DE",
+        "background_color": "#FFFFFF", "text_color": "#000000",
+        "font_family": "Arial, Helvetica, sans-serif",
+        "font_size_body": "11pt", "font_size_heading": "16pt",
+        "font_size_subheading": "13pt", "line_height": "1.5",
+        "page_margin": "20mm", "table_border_color": "#AAAAAA",
+        "table_header_bg": "#000000", "table_header_text": "#FFFFFF",
+    },
+    "layout": {
+        "has_header": True, "header_bg_color": None,
+        "header_text_color": "#000000", "has_footer": True,
+        "footer_bg_color": None, "columns": 1, "page_size": "A4",
+    },
+    "has_logo": True, "logo_position": "top-left", "has_images": False,
+}
 
 
 def _extract_json_from_anywhere(raw: str) -> dict:
-    """
-    Try to extract JSON from a model response using every strategy:
-    1. After stripping thinking blocks
-    2. Inside the thinking block (model put it there before truncation)
-    3. Largest parseable JSON fragment (handles token-truncated output)
-    Raises ValueError only if nothing works.
-    """
-    import re as _re
+    thought_content = ""
+    m = re.search(r'<(?:thought|thinking)[^>]*>(.*?)</(?:thought|thinking)>',
+                  raw, flags=re.DOTALL|re.IGNORECASE)
+    if m: thought_content = m.group(1)
+    m2 = re.search(r'<(?:thought|thinking)[^>]*>(.*)', raw, flags=re.DOTALL|re.IGNORECASE)
+    if m2 and len(m2.group(1)) > len(thought_content): thought_content = m2.group(1)
 
-    def _try_parse(text: str) -> dict:
+    stripped = _strip_thinking(raw)
+
+    def _try(text):
         text = text.strip()
-        if not text:
-            raise ValueError("empty")
-        # Strip ``` fences
+        if not text: raise ValueError("empty")
         if "```" in text:
             for part in text.split("```"):
                 p = part.strip()
                 if p.startswith("json"): p = p[4:].strip()
                 if p.startswith("{"): text = p; break
-        # Find outermost {}
         s, e = text.find("{"), text.rfind("}")
         if s != -1 and e != -1:
-            candidate = text[s:e+1]
-            candidate = _re.sub(r',\s*([}\]])', r'\1', candidate)
-            return json.loads(candidate)
-        raise ValueError("no JSON object found")
+            c = re.sub(r',(\s*[}\]])', r'\1', text[s:e+1])
+            return json.loads(c)
+        raise ValueError("no JSON")
 
-    # Capture thought block content before stripping
-    thought_content = ""
-    m = _re.search(r'<(?:thought|thinking)[^>]*>(.*?)</(?:thought|thinking)>',
-                   raw, flags=_re.DOTALL | _re.IGNORECASE)
-    if m:
-        thought_content = m.group(1)
-    # Also grab unclosed block content
-    m2 = _re.search(r'<(?:thought|thinking)[^>]*>(.*)', raw,
-                    flags=_re.DOTALL | _re.IGNORECASE)
-    if m2 and len(m2.group(1)) > len(thought_content):
-        thought_content = m2.group(1)
+    for src in [stripped, thought_content, raw]:
+        try: return _try(src)
+        except Exception: pass
 
-    stripped = _strip_thinking(raw)
-
-    # Strategy 1: clean output after thinking
-    try:
-        return _try_parse(stripped)
-    except Exception:
-        pass
-
-    # Strategy 2: JSON was inside the thought block
-    if thought_content:
-        try:
-            return _try_parse(thought_content)
-        except Exception:
-            pass
-
-    # Strategy 3: token-truncated JSON — try largest parseable prefix
-    for text in [stripped, thought_content, raw]:
-        s = text.find("{")
-        if s == -1:
-            continue
-        fragment = text[s:]
-        for i in range(len(fragment) - 1, -1, -1):
-            if fragment[i] == "}":
+    for src in [stripped, thought_content, raw]:
+        s = src.find("{")
+        if s == -1: continue
+        frag = src[s:]
+        for i in range(len(frag)-1, -1, -1):
+            if frag[i] == "}":
                 try:
-                    candidate = _re.sub(r',\s*([}\]])', r'\1', fragment[:i+1])
-                    return json.loads(candidate)
-                except Exception:
-                    continue
-
-    raise ValueError("No parseable JSON found in model response")
+                    return json.loads(re.sub(r',(\s*[}\]])', r'\1', frag[:i+1]))
+                except Exception: continue
+    raise ValueError("No parseable JSON found")
 
 
 def _pass_a(client, img_parts, model) -> dict:
-    log.info("[Step 2] Pass A — styles (max_tokens=8192 to survive thinking overhead)")
+    log.info("[Step 2] Pass A — styles (max_tokens=8192)")
     t0 = time.time()
-    resp = client.chat.completions.create(
-        model=model,
-        messages=[{"role": "user", "content": img_parts + [{"type": "text", "text": STYLE_PROMPT}]}],
-        max_tokens=8192,   # was 1024 — thinking consumed all tokens leaving no room for JSON
+    raw = stream_completion(
+        client, model,
+        messages=[{"role":"user","content": img_parts + [{"type":"text","text":STYLE_PROMPT}]}],
+        max_tokens=8192,
+        label="Step2-PassA",
     )
-    log.info("[Step 2] Pass A done %.1fs", time.time() - t0)
-    raw = resp.choices[0].message.content or ""
+    log.info("[Step 2] Pass A done %.1fs", time.time()-t0)
     log.debug("[Step 2] Pass A raw (first 300): %s", raw[:300])
-
     try:
         result = _extract_json_from_anywhere(raw)
-        log.info("[Step 2] Pass A parsed OK — primary_color=%s",
+        log.info("[Step 2] Pass A OK — primary_color=%s",
                  result.get("styles", {}).get("primary_color", "?"))
         return result
     except Exception as e:
@@ -275,197 +376,137 @@ def _pass_a(client, img_parts, model) -> dict:
         return _STYLE_DEFAULTS
 
 
-# ── Pass B ────────────────────────────────────────────────────────────────────
+# ── Pass B: skeleton ───────────────────────────────────────────────────────────
 
-SKELETON_SYSTEM = """You are a document skeleton extractor. Your output must be a pixel-faithful
-HTML reproduction of the source PDF with variable fields replaced by descriptive named tokens.
+SKELETON_PROMPT = """You are extracting the EXACT structure of a document as an HTML skeleton.
 
-ABSOLUTE RULES — violating any of these is a critical failure:
-
-1. NEVER change the currency. If you see "FCFA", "XAF", "€", "CFA" — copy it exactly.
-   WRONG: changing FCFA to $ or € or any other currency.
-
-2. NEVER invent text. Every label, column header, company name, address, legal text,
-   registration number, phone, email must be copied VERBATIM from the document.
-   WRONG: "Nom du Client" when the document says "Facturé à".
-   WRONG: "Prestation de services" when the document says "Service des repas collectifs".
-   WRONG: "Paris" or "France" when the document says "Douala" or "Cameroon".
-
-3. NEVER change the table structure. Reproduce column headers word-for-word.
-
-4. Replace ONLY variable data with descriptive named tokens using DOUBLE curly braces.
-   Tokens MUST be descriptive — named after what they represent, in SCREAMING_SNAKE_CASE.
-
-   CORRECT token examples:
-     {{INVOICE_NUMBER}}   for an invoice/facture number
-     {{INVOICE_DATE}}     for the date
-     {{CLIENT_NAME}}      for the client's name
-     {{CLIENT_ADDRESS}}   for the client's address
-     {{QUANTITY}}         for a quantity/quantité
-     {{UNIT_PRICE}}       for a unit price/prix unitaire
-     {{LINE_TOTAL}}       for a line total
-     {{GRAND_TOTAL}}      for the grand total
-     {{AMOUNT_IN_WORDS}}  for the written-out amount
-     {{BANK_ACCOUNT}}     for a bank account number
-     {{PERIOD_START}}     for a start date/period
-     {{PERIOD_END}}       for an end date/period
-
-   WRONG — never use these generic tokens:
-     {{PLACEHOLDER}}  ← TOO GENERIC, forbidden
-     {{VALUE}}        ← TOO GENERIC, forbidden
-     {{TEXT}}         ← TOO GENERIC, forbidden
-     {{FIELD}}        ← TOO GENERIC, forbidden
-     {{DATA}}         ← TOO GENERIC, forbidden
-
-5. Keep ALL static text exactly as-is:
-   - Company name, slogan, service bullets
-   - Table column headers (verbatim from PDF)
-   - Row labels: "Total HT", "Total TTC", "Payable au compte:", etc.
-   - Footer: full address, phone, email, registration numbers, tax regime
-   - Currency codes/symbols: FCFA, XAF, €, etc. — never change these
-
-6. Use inline CSS only. Match colors and fonts exactly from the style reference.
-7. Output ONLY the HTML starting with <!DOCTYPE html>. No explanation, no markdown."""
+ABSOLUTE RULES:
+1. NEVER change the currency (FCFA, XAF, €, etc.) — copy it exactly.
+2. NEVER invent text — every label, column header, company name, address, legal text
+   must be copied VERBATIM from the document images.
+3. NEVER change the table structure — same columns, same headers word-for-word.
+4. For the logo/images: write [LOGO] exactly where the logo appears.
+   Do NOT write a file path. Do NOT write base64. Just write the text [LOGO].
+   We will replace [LOGO] with the real image automatically after you finish.
+5. Replace ONLY variable data with descriptive named tokens in DOUBLE curly braces.
+   Examples: {{INVOICE_NUMBER}}, {{CLIENT_NAME}}, {{QUANTITY}}, {{TOTAL_XAF}}
+   FORBIDDEN generic names: {{PLACEHOLDER}}, {{VALUE}}, {{TEXT}}, {{DATA}}
+6. Keep ALL static text exactly: company name, slogan, column headers,
+   row labels (Total HT, Payable au compte, etc.), footer address/phone/email,
+   currency codes, registration numbers.
+7. Use inline CSS only. Match colors and fonts from the style reference exactly.
+8. Output ONLY the HTML starting with <!DOCTYPE html>. No explanation."""
 
 
 def _pass_b(client, img_parts, styles, assets, model) -> str:
     log.info("[Step 2] Pass B — HTML skeleton")
 
+    # Tell the model about assets but instruct it to use [LOGO] sentinel only
     asset_hint = ""
     if assets:
-        lines = ["\nASSETS (use exact file:// paths, do not change):"]
-        for i, a in enumerate(assets):
-            role = "LOGO" if i == 0 and styles.get("has_logo") else f"IMAGE_{i+1}"
-            lines.append(f'  [{role}]: <img src="file://{a["path"]}" style="max-height:80px;width:auto;" alt="{role}" />')
-        asset_hint = "\n".join(lines)
+        log.info("[Step 2]   %d asset(s) detected — instructing model to use [LOGO] sentinel", len(assets))
+        asset_hint = (
+            f"\n\nASSETS DETECTED: {len(assets)} image(s) extracted from this PDF "
+            f"(logo: {assets[0]['width']}x{assets[0]['height']}px). "
+            "Write [LOGO] exactly where the logo appears — do not use file paths or base64."
+        )
 
     prompt = (
         f"STYLE REFERENCE:\n```json\n{json.dumps(styles.get('styles',{}), indent=2)}\n```"
         f"{asset_hint}\n\n"
-        + SKELETON_SYSTEM
+        + SKELETON_PROMPT
     )
 
     t0 = time.time()
-    resp = client.chat.completions.create(
-        model=model,
+    raw = stream_completion(
+        client, model,
         messages=[{"role":"user","content": img_parts + [{"type":"text","text":prompt}]}],
         max_tokens=8192,
+        label="Step2-PassB",
     )
     elapsed = time.time()-t0
-    log.info("[Step 2] Pass B done %.1fs", elapsed)
-
-    finish = getattr(resp.choices[0], "finish_reason", None)
-    if finish and finish != "stop":
-        log.warning("[Step 2] Pass B finish_reason=%s — may be truncated!", finish)
-
-    raw = resp.choices[0].message.content or ""
-    log.info("[Step 2] Pass B: %d chars", len(raw))
-    html = _strip_fences(raw)
-
-    # Detect model reasoning contamination before saving anything
-    html, warnings = _sanitize_skeleton(html)
-
-    ph = re.findall(r'\{\{([A-Z0-9_]+)\}\}', html)
-    log.info("[Step 2] Placeholders found: %s", sorted(set(ph)))
-
-    return html
+    log.info("[Step 2] Pass B done %.1fs — %d chars", elapsed, len(raw))
+    return _strip_fences(raw)
 
 
-# ── Entry point ───────────────────────────────────────────────────────────────
+# ── Main entry point ───────────────────────────────────────────────────────────
 
 def analyze_pages(image_paths: list, output_dir: str, model_name: str) -> dict:
+    """
+    Two-pass analysis:
+      Pass A → styles JSON
+      Pass B → HTML skeleton with {{PLACEHOLDER}} slots and [LOGO] sentinel
+      Post-process → inject real base64 assets, replacing [LOGO] and all <img> tags
+    """
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
 
     log.info("[Step 2] Two-pass analysis — model=%s  pages=%d", model_name, len(image_paths))
 
-    client   = _make_client()
-    sampled  = _sample_pages(image_paths)
-    assets   = _load_asset_paths(Path(image_paths[0]).parent)
+    client    = _make_client()
+    sampled   = _sample_pages(image_paths)
+    assets    = _load_asset_paths(Path(image_paths[0]).parent)
     img_parts = _image_parts(sampled)
 
     # Pass A
     try:
         styles = _pass_a(client, img_parts, model_name)
     except Exception as e:
-        log.error("[Step 2] Pass A failed: %s", e); raise
+        log.error("[Step 2] Pass A failed: %s", e)
+        raise
 
     # Pass B
     try:
-        skeleton_html = _pass_b(client, img_parts, styles, assets, model_name)
+        skeleton_raw = _pass_b(client, img_parts, styles, assets, model_name)
     except Exception as e:
-        log.error("[Step 2] Pass B failed: %s", e); raise
+        log.error("[Step 2] Pass B failed: %s", e)
+        raise
+
+    # Sanitize
+    try:
+        skeleton_html, _ = _sanitize_skeleton(skeleton_raw)
+    except ValueError as e:
+        log.error("[Step 2] Skeleton contamination: %s", e)
+        raise
+
+    # ── POST-PROCESS: inject real base64 assets ─────────────────────────────
+    if assets:
+        log.info("[Step 2] Injecting %d asset(s) as base64 data URIs", len(assets))
+        skeleton_html = _inject_assets_into_skeleton(skeleton_html, assets)
+    else:
+        log.info("[Step 2] No assets to inject")
+
+    # Report placeholders
+    ph = re.findall(r'\{\{([A-Z0-9_]+)\}\}', skeleton_html)
+    log.info("[Step 2] Placeholders: %s", sorted(set(ph)))
+
+    # Check logo injection worked
+    if "[LOGO]" in skeleton_html:
+        log.warning("[Step 2] [LOGO] sentinel still in skeleton after injection — no asset matched")
+
+    has_img = "<img" in skeleton_html.lower()
+    log.info("[Step 2] Has <img> tag after injection: %s", has_img)
 
     # Persist
     template = {
         **styles,
         "total_pages": len(image_paths),
         "embedded_assets": [
-            {"index":i,"path":a["path"],"page":a["page"],
-             "width":a["width"],"height":a["height"],"ext":a.get("ext","png")}
+            {"index": i, "path": a["path"], "page": a["page"],
+             "width": a["width"], "height": a["height"], "ext": a.get("ext","png")}
             for i, a in enumerate(assets)
         ],
     }
 
-    (output / "template.json").write_text(
-        json.dumps(template, indent=2, ensure_ascii=False), encoding="utf-8")
-    (output / "skeleton.html").write_text(skeleton_html, encoding="utf-8")
+    tpl_path      = output / "template.json"
+    skeleton_path = output / "skeleton.html"
 
-    log.info("[Step 2] ✅ template.json + skeleton.html written to %s", output)
+    tpl_path.write_text(json.dumps(template, indent=2, ensure_ascii=False), encoding="utf-8")
+    skeleton_path.write_text(skeleton_html, encoding="utf-8")
+
+    log.info("[Step 2] ✅ template.json → %s (%dKB)",
+             tpl_path, tpl_path.stat().st_size//1024)
+    log.info("[Step 2] ✅ skeleton.html → %s (%dKB)",
+             skeleton_path, skeleton_path.stat().st_size//1024)
+
     return template
-
-
-# ── Skeleton sanitizer ────────────────────────────────────────────────────────
-
-# Phrases that indicate the model leaked its reasoning into the skeleton output
-_THINKING_MARKERS = [
-    "the user wants",
-    "let me ",
-    "i need to",
-    "looking at",
-    "looking closer",
-    "let's refine",
-    "wait,",
-    "this is definitely",
-    "-> ",          # the model uses -> to show its reasoning steps
-    "the currency",
-    "must be kept",
-]
-
-def _sanitize_skeleton(html: str) -> tuple[str, list]:
-    """
-    Detect contamination from model reasoning leaking into the skeleton.
-    Returns (cleaned_html, list_of_warnings).
-    If contamination is severe (reasoning text in <body>), raises ValueError.
-    """
-    warnings = []
-    lower = html.lower()
-
-    # Check for thinking markers in the visible body content (not in comments/style)
-    body_start = lower.find("<body")
-    if body_start == -1:
-        body_start = 0
-    body_content = lower[body_start:]
-
-    contaminated = [m for m in _THINKING_MARKERS if m in body_content]
-    if contaminated:
-        warnings.append(f"Model reasoning leaked into skeleton: {contaminated[:3]}")
-        log.warning("[Step 2] ⚠ Skeleton contamination detected: %s", contaminated[:3])
-
-    # Check skeleton starts with <!DOCTYPE html> (not with reasoning text)
-    if not html.strip().lower().startswith("<!doctype") and not html.strip().lower().startswith("<html"):
-        raise ValueError(
-            "Skeleton does not start with <!DOCTYPE html> — the model returned "
-            "reasoning text instead of HTML. Re-analyze this template."
-        )
-
-    # If contaminated, reject the skeleton so pipeline fails clearly
-    # rather than saving garbage to disk
-    if contaminated:
-        raise ValueError(
-            f"AI reasoning text leaked into skeleton ({contaminated[0]!r} found in body). "
-            "This happens when the model is in 'thinking' mode. "
-            "Re-analyze the template — it will use a fresh model call."
-        )
-
-    return html, warnings

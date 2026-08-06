@@ -69,6 +69,11 @@ class GeneratedDocument(models.Model):
     )
     template    = models.ForeignKey(Template, on_delete=models.CASCADE, related_name="documents")
     title       = models.CharField(max_length=200)
+    mode        = models.CharField(
+        max_length=10,
+        choices=[("fill", "Template Fill"), ("style", "Style Clone")],
+        default="fill",
+    )
     content     = models.TextField()
     html_file   = models.FileField(upload_to="output/html/", null=True, blank=True)
     pdf_file    = models.FileField(upload_to="output/pdf/",  null=True, blank=True)

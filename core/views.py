@@ -118,26 +118,26 @@ def document_create(request):
         if form.is_valid():
             tmpl = form.cleaned_data["template"]
 
-            skeleton_path = Path(tmpl.template_dir) / "skeleton.html" if tmpl.template_dir else None
-            placeholders  = []
-            if skeleton_path and skeleton_path.exists():
-                html         = skeleton_path.read_text(encoding="utf-8")
-                placeholders = sorted(set(re.findall(r'\{\{([A-Z0-9_]+)\}\}', html)))
+            # The JS always assembles content into the hidden 'content' field
+            # regardless of which mode the user chose. We just read it directly.
+            content = request.POST.get("content", "").strip()
 
-            if placeholders:
-                # ── Template Fill mode ──────────────────────────────────────
-                lines = []
-                for ph in placeholders:
-                    val = request.POST.get(f"field_{ph}", "").strip()
-                    if val:
-                        lines.append(f"{ph}: {val}")
-                extra = request.POST.get("extra_instructions", "").strip()
-                if extra:
-                    lines.append(f"\n[EXTRA INSTRUCTIONS]\n{extra}")
-                content = "\n".join(lines)
-            else:
-                # ── Style Clone mode — read assembled hidden field ──────────
-                content = request.POST.get("content", "").strip()
+            # Fallback: if the hidden field is empty but field_* values exist
+            # (e.g. JS didn't run), build content from individual fields
+            if not content and tmpl.template_dir:
+                skeleton_path = Path(tmpl.template_dir) / "skeleton.html"
+                if skeleton_path.exists():
+                    html         = skeleton_path.read_text(encoding="utf-8")
+                    placeholders = sorted(set(re.findall(r'\{\{([A-Z0-9_]+)\}\}', html)))
+                    lines = []
+                    for ph in placeholders:
+                        val = request.POST.get(f"field_{ph}", "").strip()
+                        if val:
+                            lines.append(f"{ph}: {val}")
+                    extra = request.POST.get("extra_instructions", "").strip()
+                    if extra:
+                        lines.append(f"\n[EXTRA INSTRUCTIONS]\n{extra}")
+                    content = "\n".join(lines)
 
             if not content:
                 messages.error(request, "Please provide content for the document.")
@@ -153,6 +153,7 @@ def document_create(request):
             doc.content     = content
             doc.workspace   = request.workspace
             doc.created_by  = request.user
+            doc.mode        = request.POST.get("mode", "fill")
             doc.save()
             pipeline.async_generate(str(doc.pk))
             messages.success(request, f"Generating '{doc.title}'…")

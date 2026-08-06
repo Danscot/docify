@@ -5,23 +5,23 @@
 
 {% block content %}
 
-<!-- Mode explanation banner -->
+<!-- Mode toggle — clickable -->
 <div class="mode-banner">
-  <div class="mode-banner-item" id="banner-fill">
+  <button type="button" class="mode-banner-item" id="banner-fill" onclick="switchMode('fill')">
     <div class="mode-banner-icon">📋</div>
     <div>
       <div class="mode-banner-title">Template Fill</div>
-      <div class="mode-banner-desc">For structured documents like invoices — just change the variable fields</div>
+      <div class="mode-banner-desc">For invoices &amp; forms — fill in variable fields only</div>
     </div>
-  </div>
+  </button>
   <div class="mode-banner-sep">or</div>
-  <div class="mode-banner-item" id="banner-style">
+  <button type="button" class="mode-banner-item" id="banner-style" onclick="switchMode('style')">
     <div class="mode-banner-icon">🎨</div>
     <div>
       <div class="mode-banner-title">Style Clone</div>
-      <div class="mode-banner-desc">For reports and documents — paste your content, get it formatted in the company style</div>
+      <div class="mode-banner-desc">For reports — paste raw content, get it styled automatically</div>
     </div>
-  </div>
+  </button>
 </div>
 
 <div class="form-page">
@@ -111,7 +111,7 @@
 
         <div class="field">
           <label class="field-label" for="id_content">Your Content</label>
-          <textarea name="content" id="id_content"
+          <textarea id="id_content"
                     class="form-textarea" rows="12"
                     placeholder="Paste your raw report, notes, or structured text here.
 
@@ -130,12 +130,13 @@ The AI will reformat this using the template's exact fonts, colors, and layout."
         </div>
       </div>
 
-      <!-- Hidden content field for form submission (filled by JS) -->
-      <input type="hidden" name="content" id="content-hidden" value="" />
+      <!-- Hidden fields populated by JS before submit -->
+      <input type="hidden" name="content" id="content-assembled" value="" />
+      <input type="hidden" name="mode"    id="mode-field"        value="fill" />
 
       <div class="form-actions">
         <a href="{% url 'core:document_list' %}" class="btn-secondary">Cancel</a>
-        <button type="submit" class="btn-primary" id="submit-btn" onclick="prepareSubmit()">Generate →</button>
+        <button type="submit" class="btn-primary" id="submit-btn">Generate →</button>
       </div>
     </form>
   </div>
@@ -208,6 +209,29 @@ function setMode(mode) {
   }
 }
 
+// switchMode is called when the user CLICKS a mode button — overrides auto-detection
+function switchMode(mode) {
+  var modeField = document.getElementById('mode-field');
+  if (modeField) modeField.value = mode;
+
+  if (mode === 'fill') {
+    fieldsSection.style.display   = 'block';
+    freetextSection.style.display = 'none';
+    var hasFields = fieldsGrid && fieldsGrid.querySelectorAll('.ph-field').length > 0;
+    if (!hasFields && fieldsGrid) {
+      fieldsGrid.innerHTML =
+        '<p style="font-size:13px;color:var(--ink-muted);padding:8px 0">' +
+        'Select a template above to load its variable fields.' +
+        '</p>';
+      fieldsBadge.textContent = '';
+    }
+  } else {
+    fieldsSection.style.display   = 'none';
+    freetextSection.style.display = 'block';
+  }
+  setMode(mode);
+}
+
 function renderFields(placeholders, templateName, defaults) {
   defaults = defaults || {};
   var hasDefaults = Object.keys(defaults).length > 0;
@@ -217,6 +241,8 @@ function renderFields(placeholders, templateName, defaults) {
     fieldsSection.style.display  = 'none';
     freetextSection.style.display = 'block';
     fieldsBadge.textContent = '';
+    var mf = document.getElementById('mode-field');
+    if (mf) mf.value = 'style';
     setMode('style');
     asideContent.innerHTML =
       '<h3 class="aside-title">Style Clone mode</h3>' +
@@ -231,6 +257,8 @@ function renderFields(placeholders, templateName, defaults) {
   // Template Fill mode
   fieldsSection.style.display  = 'block';
   freetextSection.style.display = 'none';
+  var mf = document.getElementById('mode-field');
+  if (mf) mf.value = 'fill';
   setMode('fill');
   fieldsBadge.textContent = placeholders.length + ' field' + (placeholders.length !== 1 ? 's' : '');
 
@@ -324,17 +352,18 @@ if (templateSelect) {
   });
 }
 
-// Before submitting: assemble content from whichever mode is active
-function prepareSubmit() {
-  var inFillMode = fieldsSection.style.display !== 'none';
-  var hiddenContent = document.getElementById('content-hidden');
+// Wire content assembly to form submit — guaranteed to run before POST
+document.getElementById('gen-form').addEventListener('submit', function() {
+  var inFillMode    = fieldsSection.style.display !== 'none';
+  var assembled     = document.getElementById('content-assembled');
+  var modeField     = document.getElementById('mode-field');
+  var freetextArea  = document.getElementById('id_content');
 
   if (inFillMode) {
-    // Collect field values → KEY: value lines
+    // Template Fill — collect KEY: value lines
     var lines = [];
     document.querySelectorAll('.ph-input').forEach(function(inp) {
-      // Extract placeholder name from input name="field_KEY"
-      var ph = inp.name.replace(/^field_/, '');
+      var ph  = inp.name.replace(/^field_/, '');
       var val = inp.value.trim();
       if (val) lines.push(ph + ': ' + val);
     });
@@ -342,18 +371,14 @@ function prepareSubmit() {
     if (extra && extra.value.trim()) {
       lines.push('\n[EXTRA INSTRUCTIONS]\n' + extra.value.trim());
     }
-    hiddenContent.value = lines.join('\n');
-
-    // Disable the freetext textarea so it's not submitted
-    var freetext = document.getElementById('id_content');
-    if (freetext) freetext.disabled = true;
+    assembled.value = lines.join('\n');
+    modeField.value = 'fill';
   } else {
-    // Style Clone mode — use the freetext content directly
-    var freetext = document.getElementById('id_content');
-    hiddenContent.value = freetext ? freetext.value.trim() : '';
-    if (freetext) freetext.disabled = true;
+    // Style Clone — pass raw text as-is
+    assembled.value = freetextArea ? freetextArea.value.trim() : '';
+    modeField.value = 'style';
   }
-}
+});
 </script>
 {% endverbatim %}
 

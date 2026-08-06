@@ -163,8 +163,9 @@ def run_generate(document_id: str):
         out_dir.mkdir(parents=True, exist_ok=True)
 
         # ── Step 3 ──
-        log.info("[generate] ── Step 3: Generate HTML ──")
-        html_path = generate_html(template_data, doc.content, str(out_dir), _model())
+        log.info("[generate] ── Step 3: Generate HTML (mode=%s) ──", doc.mode)
+        html_path = generate_html(template_data, doc.content, str(out_dir), _model(),
+                                  mode=doc.mode)
         log.info("[generate] Step 3 done → %s", html_path)
 
         # ── Step 4 ──
